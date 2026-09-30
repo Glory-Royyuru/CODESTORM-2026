@@ -8,6 +8,7 @@ import { useState } from "react";
 import { GitHubIcon, LogoIcon } from "@/components/hero/icons";
 import { cx } from "@/components/ui/primitives";
 import { useGateway, useUi } from "@/lib/store";
+import BackendStatus from "./BackendStatus";
 import KillSwitch from "./KillSwitch";
 
 export const NAV = [
@@ -65,6 +66,7 @@ export default function TopNav() {
         </div>
 
         <div className="flex shrink-0 items-center gap-2.5">
+          <BackendStatus />
           <KillSwitch />
           <button
             type="button"
