@@ -61,3 +61,48 @@ def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# --- Phase 2: tool registry + permission enforcement ---
+
+
+def test_registered_and_authorized_tool_returns_allow():
+    response = client.post("/api/tool-call", json=VALID_REQUEST)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "ALLOW"
+    assert body["rule_id"] == "BASE-001"
+
+
+def test_unknown_tool_is_blocked():
+    request = {**VALID_REQUEST, "tool": "wipe_disk"}
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "TOOL-001"
+    assert body["reason"] == "Tool is not registered"
+
+
+def test_disabled_tool_is_blocked():
+    request = {**VALID_REQUEST, "agent_id": "admin-bot", "tool": "delete_database"}
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "TOOL-002"
+    assert body["reason"] == "Tool is disabled"
+
+
+def test_unauthorized_agent_is_blocked():
+    request = {**VALID_REQUEST, "agent_id": "random-agent"}
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "TOOL-003"
+    assert body["reason"] == "Agent is not authorized to use this tool"
