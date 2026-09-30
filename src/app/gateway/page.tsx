@@ -1,5 +1,5 @@
 import GatewayView from "@/components/gateway/GatewayView";
 
-export default function Home() {
+export default function GatewayPage() {
   return <GatewayView />;
 }
