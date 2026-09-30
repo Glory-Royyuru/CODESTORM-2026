@@ -1,0 +1,22 @@
+# `src/` — application source
+
+```
+src/
+├── app/          Routes (URLs). Thin: each page just renders a View from components/.
+├── components/   Everything you see. One folder per screen, plus shared pieces.
+└── lib/          Non-visual logic: the real backend client (satg/), the demo engine (gateway/) and the React ↔ engine store.
+```
+
+How the three connect:
+
+```
+URL (/audit)  →  src/app/audit/page.tsx  →  <AuditView/>  (src/components/audit/)
+                                                │
+                                                ├─ reads data with useGateway()     (src/lib/store.ts)
+                                                └─ calls actions on getGateway()    → Gateway engine (src/lib/gateway/engine.ts)
+                                                                                      └─ emit() → every screen re-renders
+```
+
+The Live Gateway is the exception: it talks to the real SATG backend through `src/lib/satg/` and `src/app/api/satg/`, not to the demo engine.
+
+All screens are wrapped by `AppShell` (from `src/app/layout.tsx`), which draws the animated background, the top navigation with the kill switch, and the toasts.
