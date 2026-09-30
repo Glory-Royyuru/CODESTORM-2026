@@ -2,8 +2,9 @@
 
 | Path | What it is |
 | --- | --- |
-| `gateway/` | The security engine (no React). See `gateway/README.md`. |
-| `store.ts` | The bridge between React and the engine, plus small UI state. |
+| `satg/` | **Real backend integration** for the Live Gateway: `proxy.ts` (server-side forwarding used by `src/app/api/satg/`), `client.ts` (browser client + strict `Verdict` validation), `presets.ts` (example request bodies), `log.ts` (this tab's backend responses). |
+| `gateway/` | The in-browser **demo engine** (no React) behind every simulated screen. Not authoritative. See `gateway/README.md`. |
+| `store.ts` | The bridge between React and the demo engine, plus small UI state. |
 
 ## `store.ts` in three parts
 
