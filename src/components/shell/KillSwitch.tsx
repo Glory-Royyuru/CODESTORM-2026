@@ -5,7 +5,10 @@ import { cx } from "@/components/ui/primitives";
 import { getGateway, useGateway, useUi } from "@/lib/store";
 import { toWire } from "@/lib/gateway/ingress";
 
-/** Global emergency kill switch (M1/M11): flips the gateway into FAIL_CLOSED. */
+/**
+ * Kill switch of the in-browser demo engine (M1/M11): flips the *simulated* gateway into FAIL_CLOSED.
+ * The SATG backend has no kill-switch API yet, so this does not affect Live Gateway requests.
+ */
 export default function KillSwitch() {
   const gw = useGateway();
   const toast = useUi((s) => s.toast);
@@ -19,10 +22,10 @@ export default function KillSwitch() {
       const probe = g.createSession({ agentId: "agent:kill-switch-probe", userId: "u_secops", tenant: "acme" }, "Kill-switch verification probe", ["calendar:read"]);
       const res = g.process({ raw: toWire("MCP", "calendar_read", { from: "2026-09-30", to: "2026-09-30" }), sessionId: probe.id, groundTruth: "benign", scenario: "kill-switch-probe" });
       const b = res.entry.receipt.body;
-      toast({ tone: "danger", title: "Kill switch engaged — gateway FAIL_CLOSED", detail: `Probe call ${b.verdict} in ${b.totalLatencyMs}ms · receipt #${b.seq} signed` });
+      toast({ tone: "danger", title: "Simulation kill switch engaged — demo engine FAIL_CLOSED", detail: `Demo probe call ${b.verdict} · the real SATG backend is not affected` });
     } else {
       g.setMode("ENFORCING");
-      toast({ tone: "success", title: "Gateway restored to ENFORCING", detail: "Deterministic policy + ML fusion active" });
+      toast({ tone: "success", title: "Demo engine restored to ENFORCING", detail: "Simulation only · the real SATG backend is not affected" });
     }
   };
 
@@ -31,7 +34,7 @@ export default function KillSwitch() {
       type="button"
       onClick={toggle}
       aria-pressed={engaged}
-      title={engaged ? "Disengage kill switch" : "Engage global emergency kill switch"}
+      title={engaged ? "Disengage the simulation kill switch" : "Simulation kill switch — affects the in-browser demo engine only, not the SATG backend"}
       className={cx(
         "flex h-10 items-center gap-2 rounded-xl border px-3 text-[13px] font-semibold transition-colors",
         engaged ? "pulse-ring border-red-500/60 bg-red-500/20 text-red-200" : "border-line bg-surface text-fg/80 hover:border-red-500/40 hover:text-red-300",
@@ -39,6 +42,7 @@ export default function KillSwitch() {
     >
       <Power className="h-4 w-4" />
       <span className="hidden sm:inline">{engaged ? "FAIL_CLOSED" : "Kill Switch"}</span>
+      <span className="hidden rounded bg-fg/10 px-1 font-mono text-[10px] text-subtle sm:inline">SIM</span>
       <span className={cx("h-2 w-2 rounded-full", engaged ? "bg-red-500" : "bg-emerald-400")} />
     </button>
   );

@@ -31,11 +31,11 @@ const PHASES = [
 ];
 
 const ACCEPTANCE = [
-  ["Duplicate JSON keys rejected", "Edit the Attack Studio payload to repeat a key"],
-  ["Kill switch blocks the next call < 2ms", "Header kill switch fires a probe call"],
+  ["Duplicate JSON keys rejected (real backend)", "Live Gateway → Ingress → Duplicate JSON key"],
+  ["Kill switch blocks the next call (simulated)", "Header kill switch fires a probe call"],
   ["Description edit freezes tool", "Registry → Simulate Tool Rug-pull"],
-  ["Order 999 denied for user owning 456", "Scenario D"],
-  ["Email copy from web result BLOCKS", "Scenario A"],
+  ["Order 999 denied for user owning 456 (simulated)", "Provenance DAG → seeded scenario D"],
+  ["Email copy from web result BLOCKS (simulated)", "Provenance DAG → seeded scenario A"],
   ["Tampered receipt fails verification", "Audit → receipt → Tamper test"],
   ["SSRF to 169.254.169.254 BLOCKS", "Seeded devops session, or the payload mutator"],
   ["Approved grant is single-use", "Approvals → execute, then replay grant"],
@@ -52,7 +52,7 @@ export default function DocsView() {
             Secure Agent Tool Gateway, <span className="text-accent">in 11 modules</span>
           </>
         }
-        description="A zero-trust, provenance-aware runtime firewall that sits synchronously between autonomous agents and their tools. This console runs a complete in-browser implementation of the pipeline so every screen is backed by real decisions."
+        description="A zero-trust, provenance-aware runtime firewall that sits synchronously between autonomous agents and their tools. The Live Gateway is backed by the real SATG backend (FastAPI, Phase 1–5 deterministic core). The other screens illustrate the full 11-module design with an in-browser simulation."
       />
 
       <section>
@@ -115,19 +115,21 @@ export default function DocsView() {
         <SectionTitle>What is real and what is simulated</SectionTitle>
         <div className="grid gap-6 text-[13.5px] leading-relaxed text-muted md:grid-cols-2">
           <div>
-            <p className="mb-2 font-semibold text-emerald-400">Real, running in your browser</p>
+            <p className="mb-2 font-semibold text-emerald-400">Real — the SATG backend (Live Gateway)</p>
             <p>
-              Strict JSON parsing, protocol adapters, the multi-layer decoder, every policy rule, atom-level taint tracking, the isolation forest and other
-              models, monotonic fusion, DLP regexes, SHA-256 manifest pinning, Ed25519 signing and verification, hash chaining, capability grants and the
-              policy replay engine.
+              Every request sent from the Live Gateway goes to <code className="font-mono text-code">POST /v1/toolcalls</code> on the FastAPI backend, which is
+              the only security authority: strict ingress (64 KiB limit, UTF-8 JSON, duplicate keys, depth ≤ 8, NaN/Infinity, content type), NFKC
+              canonicalization and invisible-character rejection, request hashing, the hash-pinned tool registry, agent permissions, manifest-driven
+              parameter validation, email destination allowlists, one deterministic policy decision and a server-side audit record. The console only
+              displays the backend&apos;s verdict; it never decides, and no tool is executed.
             </p>
           </div>
           <div>
-            <p className="mb-2 font-semibold text-amber-400">Simulated</p>
+            <p className="mb-2 font-semibold text-amber-400">Simulated — every other screen</p>
             <p>
-              Tool execution (scripted outputs), the container runtime and Vault leases, and stage latencies — reported as modelled costs of the production
-              Go/OPA/ONNX stack plus measured in-browser compute. Benchmark suites are synthetic cases shaped like AgentDojo, InjecAgent, MCPTox and
-              agent-egress-bench, not the official datasets. State lives in memory and resets on reload.
+              Provenance DAG, Tool Registry, Audit Ledger, Eval Lab, Policies, Approvals and the header kill switch run on an in-browser TypeScript demo
+              engine. Its protocol adapters, taint tracking, ML scoring, fusion, sandbox, DLP, Ed25519 receipts and approval grants are not part of the
+              backend yet and are not authoritative. Tool execution is scripted, benchmark suites are synthetic, and state resets on reload.
             </p>
           </div>
         </div>

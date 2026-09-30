@@ -5,6 +5,7 @@ import { ShieldCheck } from "lucide-react";
 import InteractiveBackground from "@/components/hero/InteractiveBackground";
 import { DEFAULT_BENDS } from "@/components/hero/colorBends";
 import { useGateway, useIsClient, useUi } from "@/lib/store";
+import SimulationNotice from "./SimulationNotice";
 import TopNav from "./TopNav";
 import Toasts from "./Toasts";
 
@@ -40,7 +41,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <div className="relative min-h-screen">
       <EngineBackground />
       <TopNav />
-      <main className="relative mx-auto w-[min(1596px,calc(100%-2rem))] pb-24 pt-6 sm:w-[min(1596px,calc(100%-4rem))] lg:pt-10">{children}</main>
+      <main className="relative mx-auto w-[min(1596px,calc(100%-2rem))] pb-24 pt-6 sm:w-[min(1596px,calc(100%-4rem))] lg:pt-10">
+        <SimulationNotice />
+        {children}
+      </main>
       <Toasts />
     </div>
   );
