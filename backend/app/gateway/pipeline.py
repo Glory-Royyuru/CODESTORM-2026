@@ -1,10 +1,11 @@
-from typing import Dict, List
+from typing import List
 
 from app.gateway.destination_validator import validate_destination
 from app.gateway.parameter_validator import validate_parameters
+from app.gateway.policy_engine import CheckOutcome, decide
 from app.gateway.registry import get_tool, is_agent_authorized
 from app.models.tool_call import ToolCall
-from app.models.verdict import Severity, Verdict, VerdictType
+from app.models.verdict import Severity, Verdict
 
 CHECK_REQUEST_STRUCTURE = "REQUEST_STRUCTURE"
 CHECK_TOOL_REGISTRY = "TOOL_REGISTRY"
@@ -15,89 +16,61 @@ CHECK_DESTINATION_VALIDATION = "DESTINATION_VALIDATION"
 
 
 def process_tool_call(tool_call: ToolCall) -> Verdict:
-    """Run a ToolCall through the gateway pipeline and produce a Verdict.
+    """Run a ToolCall through the gateway's security checks, then hand the
+    accumulated results to the policy engine for the final decision.
 
     Phase 1 checked structural validity (enforced by Pydantic before this
     runs). Phase 2 added the tool registry and agent permission checks.
-    Phase 3 added parameter/schema validation. Phase 4 adds destination
-    (egress) validation for tools that send data somewhere, such as
-    send_email. Later phases will insert deeper policy evaluation here.
+    Phase 3 added parameter/schema validation. Phase 4 added destination
+    (egress) validation. Phase 5 pulls the final ALLOW/BLOCK decision out
+    of this function and into the policy engine -- this function's only
+    job is to run each check in order and collect its outcome.
 
-    Each stage is recorded in `checks` so a future UI can show a
-    pass/fail breakdown per stage, not just the final verdict.
+    Checks stop at the first failure: a tool that isn't even registered
+    has no parameters worth validating. Each validator (registry,
+    parameter, destination) remains the sole owner of its own check; this
+    function does not re-implement or duplicate their logic.
     """
-    checks: List[Dict[str, str]] = [_passed(CHECK_REQUEST_STRUCTURE)]
+    outcomes: List[CheckOutcome] = [CheckOutcome(CHECK_REQUEST_STRUCTURE, passed=True)]
 
     tool = get_tool(tool_call.tool)
     if tool is None:
-        checks.append(_failed(CHECK_TOOL_REGISTRY))
-        return _block(tool_call, "TOOL-001", "Tool is not registered", Severity.MEDIUM, checks)
-    checks.append(_passed(CHECK_TOOL_REGISTRY))
+        outcomes.append(
+            CheckOutcome(CHECK_TOOL_REGISTRY, False, "TOOL-001", "Tool is not registered", Severity.MEDIUM)
+        )
+        return decide(tool_call.agent_id, tool_call.tool, outcomes)
+    outcomes.append(CheckOutcome(CHECK_TOOL_REGISTRY, passed=True))
 
     if not tool.enabled:
-        checks.append(_failed(CHECK_TOOL_ENABLED))
-        return _block(tool_call, "TOOL-002", "Tool is disabled", Severity.MEDIUM, checks)
-    checks.append(_passed(CHECK_TOOL_ENABLED))
+        outcomes.append(CheckOutcome(CHECK_TOOL_ENABLED, False, "TOOL-002", "Tool is disabled", Severity.MEDIUM))
+        return decide(tool_call.agent_id, tool_call.tool, outcomes)
+    outcomes.append(CheckOutcome(CHECK_TOOL_ENABLED, passed=True))
 
     if not is_agent_authorized(tool, tool_call.agent_id):
-        checks.append(_failed(CHECK_AGENT_PERMISSION))
-        return _block(
-            tool_call,
-            "TOOL-003",
-            "Agent is not authorized to use this tool",
-            Severity.HIGH,
-            checks,
+        outcomes.append(
+            CheckOutcome(
+                CHECK_AGENT_PERMISSION,
+                False,
+                "TOOL-003",
+                "Agent is not authorized to use this tool",
+                Severity.HIGH,
+            )
         )
-    checks.append(_passed(CHECK_AGENT_PERMISSION))
+        return decide(tool_call.agent_id, tool_call.tool, outcomes)
+    outcomes.append(CheckOutcome(CHECK_AGENT_PERMISSION, passed=True))
 
     param_error = validate_parameters(tool_call.tool, tool_call.parameters)
     if param_error is not None:
         rule_id, reason = param_error
-        checks.append(_failed(CHECK_PARAMETER_VALIDATION))
-        return _block(tool_call, rule_id, reason, Severity.MEDIUM, checks)
-    checks.append(_passed(CHECK_PARAMETER_VALIDATION))
+        outcomes.append(CheckOutcome(CHECK_PARAMETER_VALIDATION, False, rule_id, reason, Severity.MEDIUM))
+        return decide(tool_call.agent_id, tool_call.tool, outcomes)
+    outcomes.append(CheckOutcome(CHECK_PARAMETER_VALIDATION, passed=True))
 
     destination_error = validate_destination(tool_call.tool, tool_call.parameters)
     if destination_error is not None:
         rule_id, reason = destination_error
-        checks.append(_failed(CHECK_DESTINATION_VALIDATION))
-        return _block(tool_call, rule_id, reason, Severity.HIGH, checks)
-    checks.append(_passed(CHECK_DESTINATION_VALIDATION))
+        outcomes.append(CheckOutcome(CHECK_DESTINATION_VALIDATION, False, rule_id, reason, Severity.HIGH))
+        return decide(tool_call.agent_id, tool_call.tool, outcomes)
+    outcomes.append(CheckOutcome(CHECK_DESTINATION_VALIDATION, passed=True))
 
-    return Verdict(
-        verdict=VerdictType.ALLOW,
-        severity=Severity.LOW,
-        agent_id=tool_call.agent_id,
-        tool=tool_call.tool,
-        rule_id="BASE-001",
-        reason="Tool call passed basic gateway validation",
-        stage="gateway",
-        checks=checks,
-    )
-
-
-def _passed(check: str) -> Dict[str, str]:
-    return {"check": check, "status": "PASSED"}
-
-
-def _failed(check: str) -> Dict[str, str]:
-    return {"check": check, "status": "FAILED"}
-
-
-def _block(
-    tool_call: ToolCall,
-    rule_id: str,
-    reason: str,
-    severity: Severity,
-    checks: List[Dict[str, str]],
-) -> Verdict:
-    return Verdict(
-        verdict=VerdictType.BLOCK,
-        severity=severity,
-        agent_id=tool_call.agent_id,
-        tool=tool_call.tool,
-        rule_id=rule_id,
-        reason=reason,
-        stage="gateway",
-        checks=checks,
-    )
+    return decide(tool_call.agent_id, tool_call.tool, outcomes)
