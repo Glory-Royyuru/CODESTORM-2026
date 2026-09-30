@@ -1,0 +1,7 @@
+{
+  "_note": "Synthetic fixture data for the SATG sandbox demo. Not real weather.",
+  "berlin": {"forecast": "Partly cloudy", "high_c": 18, "low_c": 9},
+  "lisbon": {"forecast": "Sunny", "high_c": 24, "low_c": 16},
+  "london": {"forecast": "Light rain", "high_c": 15, "low_c": 10},
+  "new york": {"forecast": "Clear", "high_c": 21, "low_c": 13}
+}

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -78,6 +78,67 @@ class QuarantinedAnomaly(BaseModel):
     mitigation_action: Literal["QUARANTINE_AND_HARD_DENY", "STRIP_AND_RETRY_SANDBOX", "ISOLATE_SESSION"]
 
 
+class MLFactor(BaseModel):
+    feature: str
+    value: float
+    # Share of the absolute XGBoost contribution that pushed risk up.
+    contribution: float
+
+
+class MLAssessment(BaseModel):
+    """Advisory risk assessment from the SATG ML package (ml/). Only numeric
+    model features are exposed; request text never is."""
+
+    status: Literal["ok", "unavailable", "error", "not_consulted", "disabled"]
+    mode: str
+    model_version: Optional[str] = None
+    feature_version: Optional[str] = None
+    # Calibrated fused_risk in [0, 1].
+    risk_score: Optional[float] = None
+    # Level from ml/configs/decision_thresholds.json (ALLOW < MONITOR < STEP_UP < ...).
+    risk_level: Optional[str] = None
+    # fused_risk >= 0.5, the a-priori threshold used in the ML evaluation.
+    prediction: Optional[Literal["risky", "benign"]] = None
+    conformal_abstain: Optional[bool] = None
+    signals: Dict[str, float] = Field(default_factory=dict)
+    features: Dict[str, float] = Field(default_factory=dict)
+    top_factors: List[MLFactor] = Field(default_factory=list)
+    # Which caller-supplied context fields (task, observation, previous_steps) the model saw.
+    context_used: List[str] = Field(default_factory=list)
+    latency_ms: Optional[float] = None
+    detail: Optional[str] = None
+
+
+class DecisionTrace(BaseModel):
+    """How the final verdict was reached: deterministic policy first, then ML."""
+
+    deterministic_verdict: Literal["ALLOW", "BLOCK"]
+    deterministic_rule_id: str
+    ml_mode: str
+    ml_high_risk_threshold: float
+    ml_critical_risk_threshold: float
+    final_verdict: Literal["ALLOW", "BLOCK", "ESCALATE"]
+    final_rule_id: str
+
+
+class SandboxExecution(BaseModel):
+    """Result of running an ALLOWED call in a disposable Docker container."""
+
+    sandbox_id: Optional[str] = None
+    status: Literal[
+        "success", "tool_error", "rejected", "timeout", "killed", "sandbox_unavailable",
+        "integrity_failed", "error", "not_executed",
+    ]
+    exit_code: Optional[int] = None
+    duration_ms: Optional[float] = None
+    stdout: str = ""
+    stderr: str = ""
+    # Parsed runner output, when it was valid JSON.
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    container_removed: Optional[bool] = None
+
+
 class Verdict(BaseModel):
     verdict: VerdictType
     severity: Severity
@@ -105,3 +166,8 @@ class Verdict(BaseModel):
     request_integrity: Optional[RequestIntegrity] = None
     # Present only on CRYPTO-* rejections.
     anomalies: List[QuarantinedAnomaly] = Field(default_factory=list)
+    # Present when the ML layer was reachable in the decision (not for ingress rejections).
+    ml: Optional[MLAssessment] = None
+    decision: Optional[DecisionTrace] = None
+    # Present only on ALLOW; BLOCK and ESCALATE never reach the sandbox.
+    execution: Optional[SandboxExecution] = None

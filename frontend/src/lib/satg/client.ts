@@ -69,6 +69,56 @@ export interface SatgAnomaly {
   mitigation_action: "QUARANTINE_AND_HARD_DENY" | "STRIP_AND_RETRY_SANDBOX" | "ISOLATE_SESSION";
 }
 
+/** Advisory ML assessment (backend/app/ml). Computed by the backend only. */
+export interface SatgMl {
+  status: "ok" | "unavailable" | "error" | "not_consulted" | "disabled";
+  mode: string;
+  model_version: string | null;
+  risk_score: number | null;
+  risk_level: string | null;
+  prediction: "risky" | "benign" | null;
+  conformal_abstain: boolean | null;
+  signals: Record<string, number>;
+  top_factors: { feature: string; value: number; contribution: number }[];
+  context_used: string[];
+  latency_ms: number | null;
+  detail: string | null;
+}
+
+export interface SatgDecision {
+  deterministic_verdict: "ALLOW" | "BLOCK";
+  deterministic_rule_id: string;
+  ml_mode: string;
+  ml_high_risk_threshold: number;
+  ml_critical_risk_threshold: number;
+  final_verdict: SatgVerdictType;
+  final_rule_id: string;
+}
+
+export type SatgExecutionStatus =
+  | "success"
+  | "tool_error"
+  | "rejected"
+  | "timeout"
+  | "killed"
+  | "sandbox_unavailable"
+  | "integrity_failed"
+  | "error"
+  | "not_executed";
+
+/** Result of running an ALLOWED call in the Docker sandbox. */
+export interface SatgExecution {
+  sandbox_id: string | null;
+  status: SatgExecutionStatus;
+  exit_code: number | null;
+  duration_ms: number | null;
+  stdout: string;
+  stderr: string;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  container_removed: boolean | null;
+}
+
 export interface SatgVerdict {
   verdict: SatgVerdictType;
   severity: SatgSeverity;
@@ -88,6 +138,9 @@ export interface SatgVerdict {
   network: SatgNetworkInspection[];
   request_integrity: SatgRequestIntegrity | null;
   anomalies: SatgAnomaly[];
+  ml: SatgMl | null;
+  decision: SatgDecision | null;
+  execution: SatgExecution | null;
 }
 
 /** Schema errors the backend attaches to an INGRESS-005 rejection. */
@@ -165,6 +218,73 @@ function parseAnomaly(v: unknown): SatgAnomaly | null {
   };
 }
 
+const ML_STATUSES = ["ok", "unavailable", "error", "not_consulted", "disabled"] as const;
+const EXECUTION_STATUSES = ["success", "tool_error", "rejected", "timeout", "killed", "sandbox_unavailable", "integrity_failed", "error", "not_executed"] as const;
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const optNum = (v: unknown): number | null => (isNum(v) ? v : null);
+const numRecord = (v: unknown): Record<string, number> | null =>
+  isObj(v) && Object.values(v).every(isNum) ? (Object.fromEntries(Object.entries(v)) as Record<string, number>) : null;
+
+/** Optional object field: absent/null → null; present but malformed → undefined (reject the whole verdict). */
+function optObject<T>(v: unknown, parse: (o: Record<string, unknown>) => T | null): T | null | undefined {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v)) return undefined;
+  return parse(v) ?? undefined;
+}
+
+function parseMl(v: Record<string, unknown>): SatgMl | null {
+  if (!oneOf(v.status, ML_STATUSES) || !isStr(v.mode)) return null;
+  const signals = v.signals === undefined ? {} : numRecord(v.signals);
+  const factors = v.top_factors === undefined ? [] : v.top_factors;
+  if (!signals || !Array.isArray(factors) || !factors.every((f) => isObj(f) && isStr(f.feature) && isNum(f.value) && isNum(f.contribution))) return null;
+  if (!["model_version", "risk_level", "detail"].every((k) => isOptStr(v[k]))) return null;
+  if (v.risk_score !== undefined && v.risk_score !== null && (!isNum(v.risk_score) || v.risk_score < 0 || v.risk_score > 1)) return null;
+  return {
+    status: v.status,
+    mode: v.mode,
+    model_version: optStr(v.model_version),
+    risk_score: optNum(v.risk_score),
+    risk_level: optStr(v.risk_level),
+    prediction: v.prediction === "risky" || v.prediction === "benign" ? v.prediction : null,
+    conformal_abstain: typeof v.conformal_abstain === "boolean" ? v.conformal_abstain : null,
+    signals,
+    top_factors: (factors as Record<string, unknown>[]).map((f) => ({ feature: f.feature as string, value: f.value as number, contribution: f.contribution as number })),
+    context_used: isStrList(v.context_used) ? [...v.context_used] : [],
+    latency_ms: optNum(v.latency_ms),
+    detail: optStr(v.detail),
+  };
+}
+
+function parseDecision(v: Record<string, unknown>): SatgDecision | null {
+  if (!oneOf(v.deterministic_verdict, ["ALLOW", "BLOCK"] as const) || !oneOf(v.final_verdict, VERDICTS)) return null;
+  if (!isStr(v.deterministic_rule_id) || !isStr(v.final_rule_id) || !isStr(v.ml_mode) || !isNum(v.ml_high_risk_threshold) || !isNum(v.ml_critical_risk_threshold)) return null;
+  return {
+    deterministic_verdict: v.deterministic_verdict,
+    deterministic_rule_id: v.deterministic_rule_id,
+    ml_mode: v.ml_mode,
+    ml_high_risk_threshold: v.ml_high_risk_threshold,
+    ml_critical_risk_threshold: v.ml_critical_risk_threshold,
+    final_verdict: v.final_verdict,
+    final_rule_id: v.final_rule_id,
+  };
+}
+
+function parseExecution(v: Record<string, unknown>): SatgExecution | null {
+  if (!oneOf(v.status, EXECUTION_STATUSES) || !isOptStr(v.sandbox_id) || !isOptStr(v.error)) return null;
+  if (v.result !== undefined && v.result !== null && !isObj(v.result)) return null;
+  return {
+    sandbox_id: optStr(v.sandbox_id),
+    status: v.status,
+    exit_code: optNum(v.exit_code),
+    duration_ms: optNum(v.duration_ms),
+    stdout: isStr(v.stdout) ? v.stdout : "",
+    stderr: isStr(v.stderr) ? v.stderr : "",
+    result: isObj(v.result) ? v.result : null,
+    error: optStr(v.error),
+    container_removed: typeof v.container_removed === "boolean" ? v.container_removed : null,
+  };
+}
+
 /** absent/null → null; present but malformed → undefined (reject the whole verdict). */
 function parseIntegrity(v: unknown): SatgRequestIntegrity | null | undefined {
   if (v === undefined || v === null) return null;
@@ -183,9 +303,13 @@ export function parseVerdict(v: unknown): SatgVerdict | null {
   const network = optList(v.network, parseNetwork);
   const anomalies = optList(v.anomalies, parseAnomaly);
   const integrity = parseIntegrity(v.request_integrity);
-  if (network === null || anomalies === null || integrity === undefined) return null;
-  // An integrity tag is only ever issued with an ALLOW.
-  if (integrity && v.verdict !== "ALLOW") return null;
+  const ml = optObject(v.ml, parseMl);
+  const decision = optObject(v.decision, parseDecision);
+  const execution = optObject(v.execution, parseExecution);
+  if (network === null || anomalies === null || integrity === undefined || ml === undefined || decision === undefined || execution === undefined) return null;
+  // An integrity tag is only ever issued with an ALLOW, and only an ALLOW reaches the sandbox.
+  if ((integrity || execution) && v.verdict !== "ALLOW") return null;
+  if (decision && decision.final_verdict !== v.verdict) return null;
   return {
     verdict: v.verdict,
     severity: v.severity,
@@ -204,6 +328,9 @@ export function parseVerdict(v: unknown): SatgVerdict | null {
     network,
     request_integrity: integrity,
     anomalies,
+    ml,
+    decision,
+    execution,
   };
 }
 

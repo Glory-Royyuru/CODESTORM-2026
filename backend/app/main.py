@@ -1,19 +1,37 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from app.audit.anomaly_ledger import append_anomaly, quarantine_record
 from app.audit.logger import record_audit_event
+from app.config import get_settings
 from app.gateway.identity import resolve_principal
 from app.gateway.ingress import IngressRejection, read_tool_call
 from app.gateway.pipeline import CHECK_REQUEST_STRUCTURE, process_tool_call
 from app.gateway.policy_engine import CheckOutcome, DecisionContext, decide
 from app.models.envelope import new_request_id
 from app.models.tool_call import ToolCall
-from app.models.verdict import Severity, Verdict
+from app.ml.model_loader import ModelUnavailable, get_model
+from app.models.verdict import SandboxExecution, Severity, Verdict, VerdictType
+from app.sandbox.manager import SandboxManager
 
-app = FastAPI(title="PNC3 Secure Agent Tool Gateway")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Load the ML model once at start-up (about 10 s) instead of on the first request.
+    settings = get_settings()
+    if settings.ml_mode != "off":
+        try:
+            await run_in_threadpool(get_model, settings)
+        except ModelUnavailable as error:
+            logging.getLogger("satg.ml").warning("ML model unavailable at start-up: %s (ML_MODE=%s)", error, settings.ml_mode)
+    yield
+
+
+app = FastAPI(title="PNC3 Secure Agent Tool Gateway", lifespan=lifespan)
 
 _log = logging.getLogger("satg.gateway")
 
@@ -74,7 +92,9 @@ async def _handle_tool_call(request: Request):
 
     principal = resolve_principal(tool_call.agent_id)
     try:
-        verdict = process_tool_call(tool_call, principal, request_id).verdict
+        # ML inference and Docker are blocking; keep them off the event loop.
+        result = await run_in_threadpool(process_tool_call, tool_call, principal, request_id)
+        verdict = result.verdict
     except Exception:
         # Fail closed: an unexpected error in any check blocks the request.
         _log.exception("Gateway pipeline failed; blocking request %s", request_id)
@@ -86,6 +106,15 @@ async def _handle_tool_call(request: Request):
         )
         record_audit_event(verdict, principal)
         return JSONResponse(status_code=500, content=verdict.model_dump(mode="json"))
+
+    if verdict.verdict == VerdictType.ALLOW:
+        # Only a final ALLOW reaches the sandbox; BLOCK and ESCALATE never do.
+        try:
+            execution = await run_in_threadpool(SandboxManager(get_settings()).execute, verdict, result.envelope)
+        except Exception:
+            _log.exception("Sandbox execution failed for %s", request_id)
+            execution = SandboxExecution(status="error", error="internal sandbox error; the tool may not have run")
+        verdict = verdict.model_copy(update={"execution": execution})
 
     record_audit_event(verdict, principal)
     return verdict

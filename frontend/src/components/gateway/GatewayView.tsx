@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, type Variants } from "framer-motion";
-import { ArrowRight, Ban, ServerCog, ShieldBan } from "lucide-react";
+import { ArrowRight, BrainCircuit, Container, ServerCog, ShieldBan } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { categorize, submitToolCall } from "@/lib/satg/client";
@@ -10,6 +10,7 @@ import type { RequestPreset } from "@/lib/satg/presets";
 import { useUi } from "@/lib/store";
 import AttackStudio, { type StudioRun } from "./AttackStudio";
 import EgressInspector from "./EgressInspector";
+import RiskSandboxPanel from "./RiskSandboxPanel";
 import LiveTelemetry from "./LiveTelemetry";
 import PipelineRun from "./PipelineRun";
 
@@ -22,7 +23,8 @@ const item: Variants = {
 const STATS = [
   { icon: ServerCog, label: "Live FastAPI Backend" },
   { icon: ShieldBan, label: "Deterministic Fail-Closed Veto" },
-  { icon: Ban, label: "Verdict Only · No Execution" },
+  { icon: BrainCircuit, label: "ML Risk Escalation" },
+  { icon: Container, label: "Docker-Sandboxed Execution" },
 ];
 
 export default function GatewayView() {
@@ -51,7 +53,7 @@ export default function GatewayView() {
       toast({
         tone: category === "ALLOWED" ? "success" : category === "BLOCKED" ? "danger" : "warn",
         title: `${v.tool ?? "request"} → ${v.verdict}`,
-        detail: `${v.rule_id} · ${v.reason} · ${o.roundTripMs}ms${category === "ALLOWED" ? " · not executed" : ""}`,
+        detail: `${v.rule_id} · ${v.reason} · ${o.roundTripMs}ms${category === "ALLOWED" ? ` · sandbox ${v.execution?.status ?? "not reported"}` : ""}`,
       });
     } else {
       toast({
@@ -87,7 +89,7 @@ export default function GatewayView() {
 
           <motion.p variants={item} className="mt-7 max-w-[680px] text-[clamp(1.05rem,1.2vw,1.3rem)] leading-[1.55] text-muted">
             SATG sits synchronously between agents and their tools. This console talks to the live SATG backend: strict ingress, canonicalization,
-            a hash-pinned tool registry, parameter and destination validation, and one deterministic policy decision — every request fails closed.
+            a hash-pinned tool registry, parameter and destination validation, a deterministic policy decision that ML risk scoring can only escalate, and disposable Docker sandboxes for allowed calls.
           </motion.p>
 
           <motion.ul variants={item} className="mt-8 flex flex-wrap gap-2.5">
@@ -126,6 +128,10 @@ export default function GatewayView() {
 
       <section id="pipeline" className="scroll-mt-28">
         <PipelineRun key={run?.runId ?? 0} run={run} onDone={onDone} />
+      </section>
+
+      <section>
+        <RiskSandboxPanel run={run} />
       </section>
 
       <section>

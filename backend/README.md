@@ -1,6 +1,6 @@
 # `backend/` — PNC3 Secure Agent Tool Gateway (FastAPI)
 
-A security gateway that intercepts AI agent tool calls, validates them, and returns an ALLOW/BLOCK verdict before any tool executes.
+A security gateway that intercepts AI agent tool calls, validates them, scores them with an ML risk model, and returns an ALLOW / ESCALATE / BLOCK verdict before any tool executes. Only an ALLOW is executed, in a disposable Docker sandbox.
 
 This directory is the **security authority** of the repository. The console in [`../frontend/`](../frontend/README.md) calls `POST /v1/toolcalls` and `GET /health` through its same-origin Next.js proxy and only displays the verdicts returned here; it makes no security decisions. See the [root README](../README.md) for running both together.
 
@@ -8,7 +8,7 @@ This directory is the **security authority** of the repository. The console in [
 
 The gateway implements the deterministic front half of the SATG architecture: strict ingress, canonicalization, the tool registry with manifest integrity, parameter/schema validation, destination (egress) validation, a single deterministic policy decision point, and an audit record for every decision.
 
-**No tool is executed.** The gateway only returns a verdict. Execution, response inspection/DLP, ML scoring, authentication, rate limiting and persistence belong to later work packages.
+**Only a final ALLOW is executed**, in a disposable Docker container (see *Sandbox*). BLOCK and ESCALATE never start a container. Response inspection/DLP, authentication, rate limiting and persistence belong to later work packages.
 
 ## Request Flow
 
@@ -21,8 +21,11 @@ POST /v1/toolcalls
   → Parameters      schema from the tool manifest (PARAM-*)
   → Destination     egress declared in the manifest, strict address parsing, allowlist;
                     URL egress: IPv4/IPv6 deny ranges, eTLD+1 allowlist, DNS resolve-once-and-pin (DEST-*)
-  → Policy engine   single ALLOW/BLOCK decision (BASE-001 / POLICY-*)
+  → Policy engine   single deterministic ALLOW/BLOCK decision (BASE-001 / POLICY-*)
+  → ML risk         only for a deterministic ALLOW: ml/ package risk score (advisory)
+  → Decision        deterministic BLOCK stays BLOCK; ML may escalate to ESCALATE / BLOCK (ML-*)
   → Integrity       ALLOW verdicts carry an HMAC-SHA256 tag over the approved request
+  → Sandbox         final ALLOW only: HMAC + request_hash verified, then one disposable container
   → Audit           every decision recorded, including ingress rejections; anomalies to the anomaly ledger
 ```
 
@@ -62,6 +65,9 @@ Checks stop at the first failure. An unauthorized caller learns nothing about a 
 | CRYPTO-004 | 400 | CORRUPT_CRYPTO_TOKEN: wrong length, invalid curve point, all-zero nonce, CRC-32 mismatch |
 | CRYPTO-005 | 400 | SIGNATURE_VERIFICATION_FAILURE: all-zero, degenerate, or malleable (S ≥ ℓ) signature |
 | CRYPTO-006 | 400 | DPOP_PROOF_TAMPERING: DPoP proof not a valid RFC 9449 structure (alg `none`/HS*, private JWK, ...) |
+| ML-001 | 200 | ESCALATE: ML risk ≥ `ML_HIGH_RISK_THRESHOLD`; held for review, not executed |
+| ML-002 | 200 | BLOCK: ML risk ≥ `ML_CRITICAL_RISK_THRESHOLD` |
+| ML-003 | 200 | BLOCK: `ML_MODE=required` and the model is unavailable or failed (fail closed) |
 | POLICY-001 | 200 | A check failed without its own rule ID |
 | POLICY-002 | 200 | No checks were evaluated (fail closed) |
 | POLICY-003 | 200 | A planned check was not evaluated (fail closed) |
@@ -95,6 +101,26 @@ Every anomaly goes to the append-only anomaly ledger ([app/audit/anomaly_ledger.
 ## Request Integrity
 
 Identity (who is calling) and request integrity (what was approved) are separate. Every ALLOW carries `request_integrity`, an HMAC-SHA256 tag over `request_id`, `agent_id`, `tool`, `request_hash`, `tool_manifest_hash`, `policy_version` and the pinned IPs ([app/gateway/request_integrity.py](app/gateway/request_integrity.py)). The execution layer recomputes it with `verify_request_integrity()` and must refuse the call if the tag is missing or differs. Set `SATG_GATEWAY_HMAC_SECRET` (≥ 32 bytes) to share the key with the execution layer. Without it, a random per-process key is used.
+
+## ML Risk Layer
+
+[app/ml/](app/ml/) connects the gateway to the ML package in [`../ml/`](../ml/README.md) (`satg-ml-v0.1`): MiniLM + LogisticRegression, IsolationForest, a trigram model and CUSUM, fused by a monotone XGBoost with isotonic calibration. It was trained on AgentDrift.
+
+- **Loading:** [`model_loader.py`](app/ml/model_loader.py) loads the model once per process (at start-up, about 10 s) through the package's own API. A model with a different version than `ML_MODEL_VERSION` is refused. A failed load is remembered, not retried on every request.
+- **Input:** [`feature_extractor.py`](app/ml/feature_extractor.py) builds the `MLRequest` deterministically: canonical tool and parameters, the registry description, the egress allowlists as known domains, and optional caller context (`context.task`, `context.observation`, `context.previous_steps`). The context is unauthenticated, but ML can only restrict.
+- **Output (`verdict.ml`):** `risk_score` (calibrated `fused_risk`), `risk_level` (from `ml/configs/decision_thresholds.json`), `prediction` (at 0.5), the five signals, the 11 numeric fusion features, and `top_factors` (XGBoost contributions). No request text is echoed.
+- **Decision ([`decision_engine.py`](app/gateway/decision_engine.py)):** deterministic BLOCK → BLOCK, and ML is not consulted. Otherwise risk ≥ critical (0.80) → BLOCK `ML-002`, risk ≥ high (0.60) → ESCALATE `ML-001`, else ALLOW. `verdict.decision` records the deterministic result, the thresholds and the final result.
+- **Failure:** by default (`ML_MODE=advisory`), an unavailable model or failed inference keeps the deterministic decision, as the ML integration contract requires. The failure is reported in `verdict.ml.status`, not hidden. `ML_MODE=required` blocks instead (`ML-003`).
+
+## Sandbox
+
+[app/sandbox/](app/sandbox/) runs a final ALLOW in the image built from [`../sandbox/`](../sandbox/Dockerfile).
+
+- **Manager ([`manager.py`](app/sandbox/manager.py)):** it refuses (`not_executed` / `integrity_failed`) unless the verdict is ALLOW, its HMAC tag verifies, the envelope's canonical parameters reproduce `request_hash`, and the tool is registered and enabled. The container receives only `{tool, canonical arguments, pinned IPs}` on stdin.
+- **Runner ([`docker_runner.py`](app/sandbox/docker_runner.py)):** the docker CLI with an argument list, never a shell: `--rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --memory 256m --memory-swap 256m --cpus 0.5 --pids-limit 64 --user 65532:65532 --ipc none --pull never`, with no mounts. On timeout the container is force-removed, and removal is verified (`container_removed`).
+- **In the container ([`../sandbox/runner.py`](../sandbox/runner.py)):** a fixed entrypoint runs one registered tool from a static table, re-checks its argument schema, and uses read-only synthetic fixtures. Unknown tools or bad arguments exit 2. It never evaluates input, runs a shell, or resolves DNS.
+- **`verdict.execution`:** `sandbox_id`, `status` (`success`, `tool_error`, `rejected`, `timeout`, `killed`, `sandbox_unavailable`, `integrity_failed`, `error`, `not_executed`), `exit_code`, `duration_ms`, `stdout`/`stderr` (capped), the parsed `result`, `error` and `container_removed`. The audit log keeps only a hash and size of the output.
+- **Docker unavailable:** the result is `sandbox_unavailable`. There is no host fallback.
 
 ## Identity
 
@@ -136,8 +162,12 @@ backend/
 │   │   ├── network.py              # URL egress: deny ranges, eTLD+1 allowlist, DNS pinning
 │   │   ├── crypto_guard.py         # Crypt-arithmetic quarantine guard
 │   │   ├── request_integrity.py    # HMAC-SHA256 request-integrity tags
+│   │   ├── decision_engine.py      # deterministic verdict + ML risk -> final verdict
 │   │   ├── policy_engine.py        # Single deterministic decision point
 │   │   └── pipeline.py             # Runs the checks in order
+│   ├── config.py                   # all SANDBOX_* / ML_* settings
+│   ├── ml/                         # feature_extractor, model_loader, predictor (MLRiskEngine)
+│   ├── sandbox/                    # manager (preconditions), docker_runner (hardened docker run)
 │   └── audit/
 │       ├── logger.py               # Audit events (in memory + JSON log lines)
 │       └── anomaly_ledger.py       # Append-only quarantine envelopes (in memory)
@@ -148,7 +178,8 @@ backend/
 
 ## Requirements
 
-- Python 3.11+ (tested on 3.13)
+- Python 3.14 (tested on 3.14.7). The ML inference stack (numpy, scikit-learn 1.9.0, xgboost, onnxruntime, transformers without torch) installs from wheels on 3.14. scikit-learn is pinned to the version the model artifacts were pickled with.
+- Docker with Linux containers, and the image built once: `docker build -t satg-sandbox:0.1 ../sandbox`
 
 ## Setup
 
@@ -173,7 +204,9 @@ Server runs at `http://127.0.0.1:8000`. Interactive docs: `/docs`.
 
 ```bash
 cd backend
-python -m pytest
+python -m pytest                 # unit + integration + Docker security tests (Docker tests skip without a daemon)
+python -m pytest -m "not docker"
+python -m eval.attack_lab        # scenarios through the real pipeline -> eval/results/
 ```
 
 ## Example Request

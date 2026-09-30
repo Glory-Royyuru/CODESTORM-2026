@@ -1,12 +1,15 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from app.config import get_settings
 from app.gateway.canonicalizer import CanonicalizationError, canonicalize
+from app.gateway.decision_engine import final_verdict
 from app.gateway.destination_validator import validate_destination
 from app.gateway.parameter_validator import validate_parameters
 from app.gateway.policy_engine import CheckOutcome, DecisionContext, decide
-from app.gateway.registry import get_tool, is_agent_authorized, is_manifest_intact
+from app.gateway.registry import RegisteredTool, get_tool, is_agent_authorized, is_manifest_intact
 from app.gateway.request_integrity import sign_request
+from app.ml.predictor import MLRiskEngine
 from app.models.envelope import Principal, ToolCallEnvelope
 from app.models.tool_call import ToolCall
 from app.models.verdict import RequestIntegrity, Severity, Verdict, VerdictType
@@ -42,6 +45,8 @@ class GatewayResult:
     # request could not be canonicalized. Only an ALLOW verdict authorizes
     # acting on it.
     envelope: Optional[ToolCallEnvelope]
+    # The registered tool, when the registry resolved it.
+    tool: Optional[RegisteredTool] = None
 
 
 def process_tool_call(tool_call: ToolCall, principal: Principal, request_id: str) -> GatewayResult:
@@ -62,18 +67,30 @@ def process_tool_call(tool_call: ToolCall, principal: Principal, request_id: str
       * later checks (e.g. budgets) may have side effects that must not
         happen for an already-vetoed request.
     Checks that did not run are reported in `checks_not_evaluated`.
+
+    Only a deterministic ALLOW is then scored by the ML layer, which can
+    escalate it to ESCALATE or BLOCK but never relax it (decision_engine.py).
+    Only a final ALLOW is signed for execution.
     """
     outcomes: List[CheckOutcome] = []
     facts: Dict[str, Any] = {"request_id": request_id, "planned_checks": PLANNED_CHECKS}
 
+    resolved: Dict[str, RegisteredTool] = {}
+
     def finish(envelope: Optional[ToolCallEnvelope]) -> GatewayResult:
         verdict = decide(principal.agent_id, tool_call.tool, outcomes, DecisionContext(**facts))
+        tool = resolved.get("tool")
+        if envelope is not None:
+            settings = get_settings()
+            allowed = verdict.verdict == VerdictType.ALLOW and tool is not None
+            ml = MLRiskEngine(settings).assess(envelope, tool) if allowed else None
+            verdict = final_verdict(verdict, ml, settings)
         if verdict.verdict == VerdictType.ALLOW:
             # Bind the approval to this exact request (and its DNS pins) so the
             # execution layer can refuse anything the gateway did not allow.
             integrity = RequestIntegrity(**sign_request(integrity_fields(verdict)))
             verdict = verdict.model_copy(update={"request_integrity": integrity})
-        return GatewayResult(verdict=verdict, envelope=envelope)
+        return GatewayResult(verdict=verdict, envelope=envelope, tool=tool)
 
     def fail(check: str, rule_id: str, reason: str, severity: Severity, stage: str = "gateway") -> None:
         outcomes.append(CheckOutcome(check, False, rule_id, reason, severity, stage))
@@ -90,6 +107,7 @@ def process_tool_call(tool_call: ToolCall, principal: Principal, request_id: str
     if tool is None:
         fail(CHECK_TOOL_REGISTRY, "TOOL-001", "Tool is not registered", Severity.MEDIUM)
         return finish(envelope)
+    resolved["tool"] = tool
     facts["tool_version"] = tool.version
     facts["tool_manifest_hash"] = tool.manifest_hash()
     if not is_manifest_intact(envelope.tool, tool):

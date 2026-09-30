@@ -172,13 +172,15 @@ export default function EgressInspector({ run }: { run: StudioRun | null }) {
                   <Destination n={n} />
                 </section>
               ))
-            ) : (
+            ) : v.anomalies.length > 0 ? (
               <section>
                 <p className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.12em] text-subtle">
                   <ShieldAlert className="h-3.5 w-3.5" /> Quarantined crypt-arithmetic anomalies · {v.anomalies.length}
                 </p>
                 <Anomalies anomalies={v.anomalies} />
               </section>
+            ) : (
+              <p className="rounded-xl border border-dashed border-line p-4 text-[12.5px] text-subtle">This tool has no URL destination, so there is no network inspection.</p>
             )}
           </div>
           <div className="min-w-0 space-y-3">

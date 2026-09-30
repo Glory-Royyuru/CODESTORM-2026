@@ -3,3 +3,14 @@ uvicorn
 pydantic
 pytest
 httpx
+
+# ML risk layer: inference only for the ml/ package (satg-ml-v0.1).
+# Training needs ml/requirements.txt, which adds torch; the gateway does not.
+numpy>=2.0
+# Must match the version the ml/artifacts/*.joblib models were pickled with.
+scikit-learn==1.9.0
+xgboost>=2.1
+onnxruntime>=1.18
+# Tokenizer only (no torch needed for ONNX inference).
+transformers>=4.44
+joblib>=1.4

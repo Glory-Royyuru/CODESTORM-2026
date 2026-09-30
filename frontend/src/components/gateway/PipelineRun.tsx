@@ -2,7 +2,9 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  BrainCircuit,
   CircleOff,
+  Container,
   KeyRound,
   ListChecks,
   LogIn,
@@ -42,7 +44,7 @@ const CHECKS: Record<string, { label: string; icon: LucideIcon }> = {
 };
 
 /** SATG modules that the current backend does not implement. Shown so nothing implies they ran. */
-const NOT_IN_BACKEND = ["ML scoring", "Decision fusion", "Sandbox execution", "Response DLP", "Signed receipt"];
+const NOT_IN_BACKEND = ["Response DLP", "Signed receipt"];
 
 const STATUS_CLS: Record<TileStatus, string> = {
   pass: "border-emerald-400/50 bg-emerald-400/10 text-emerald-300",
@@ -91,12 +93,35 @@ function tilesFor(v: SatgVerdict): Tile[] {
     const meta = CHECKS[c] ?? { label: c, icon: ShieldCheck };
     tiles.push({ key: c, label: meta.label, icon: meta.icon, status: "skip", detail: `${c} was not evaluated — the backend stops at the first failed check.` });
   }
+  const ml = v.ml;
+  tiles.push({
+    key: "__ml",
+    label: "ML risk",
+    icon: BrainCircuit,
+    status: !ml || ml.status === "not_consulted" || ml.status === "disabled" ? "skip" : ml.status !== "ok" ? "warn" : v.rule_id.startsWith("ML-") ? (v.verdict === "BLOCK" ? "fail" : "warn") : "pass",
+    detail:
+      ml?.status === "ok"
+        ? `risk ${ml.risk_score?.toFixed(3)} · level ${ml.risk_level} · ${ml.model_version}`
+        : ml?.status === "not_consulted" || !ml
+          ? "Not consulted — the deterministic policy already refused the call."
+          : `ML ${ml.status}${ml.detail ? `: ${ml.detail}` : ""}`,
+  });
   tiles.push({
     key: "__policy",
     label: "Policy decision",
     icon: Scale,
     status: v.verdict === "ALLOW" ? "pass" : v.verdict === "ESCALATE" ? "warn" : "fail",
     detail: `${v.verdict} · ${v.rule_id} · ${v.reason} · policy ${v.policy_version}`,
+  });
+  const e = v.execution;
+  tiles.push({
+    key: "__sandbox",
+    label: "Docker sandbox",
+    icon: Container,
+    status: !e || e.status === "not_executed" ? "skip" : e.status === "success" ? "pass" : e.status === "tool_error" || e.status === "rejected" ? "warn" : "fail",
+    detail: e
+      ? `${e.status}${e.exit_code !== null ? ` · exit ${e.exit_code}` : ""}${e.duration_ms !== null ? ` · ${e.duration_ms} ms` : ""}${e.error ? ` · ${e.error}` : ""}`
+      : `Not started — ${v.verdict} never reaches the sandbox.`,
   });
   return tiles;
 }
@@ -115,9 +140,11 @@ function VerdictDetails({ outcome }: { outcome: Extract<SatgOutcome, { kind: "ve
   const internal = v.rule_id === "GATEWAY-001";
   const summary =
     v.verdict === "ALLOW"
-      ? "Allowed by the SATG backend. Execution was not performed — this gateway only returns a verdict."
+      ? v.execution?.status === "success"
+        ? "Allowed by the SATG backend and executed in a disposable Docker sandbox."
+        : `Allowed by the SATG backend. Sandbox: ${v.execution?.status ?? "not reported"}${v.execution?.error ? ` — ${v.execution.error}` : ""}.`
       : v.verdict === "ESCALATE"
-        ? "ESCALATE is a reserved verdict and is treated as not allowed."
+        ? "Escalated by the ML risk layer: held for review and not executed."
         : internal
           ? "Internal gateway error — the backend failed closed and blocked the request."
           : `Blocked by security policy at the ${v.stage} stage. Nothing was executed.`;
