@@ -14,6 +14,10 @@ In the App Router, **every folder with a `page.tsx` is a URL**. The pages here a
 | `policies/page.tsx` | `/policies` | `PoliciesView` |
 | `approvals/page.tsx` | `/approvals` | `ApprovalsView` |
 | `docs/page.tsx` | `/docs` | `DocsView` |
+| `api/satg/v1/toolcalls/route.ts` | `POST /api/satg/v1/toolcalls` | Proxy to the SATG backend's `POST /v1/toolcalls` (raw body and status relayed unchanged) |
+| `api/satg/health/route.ts` | `GET /api/satg/health` | Proxy to the SATG backend's `GET /health` |
+
+The backend address is read server-side from `SATG_BACKEND_URL` (default `http://127.0.0.1:8000`); see `src/lib/satg/proxy.ts`.
 
 ## Shared files
 
