@@ -126,6 +126,7 @@ def test_valid_parameters_returns_allow():
         "TOOL_ENABLED",
         "AGENT_PERMISSION",
         "PARAMETER_VALIDATION",
+        "DESTINATION_VALIDATION",
     ]
     assert all(c["status"] == "PASSED" for c in body["checks"])
 
@@ -190,3 +191,53 @@ def test_empty_required_parameter_is_blocked():
     assert body["verdict"] == "BLOCK"
     assert body["rule_id"] == "PARAM-004"
     assert body["reason"] == "Required parameter 'body' cannot be empty"
+
+
+# --- Phase 4: destination/egress validation ---
+
+
+def test_allowed_email_destination_returns_allow():
+    request = {
+        **VALID_REQUEST,
+        "parameters": {"to": "user@trusted-partner.com", "subject": "Support", "body": "Hello"},
+    }
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "ALLOW"
+    assert body["rule_id"] == "BASE-001"
+    assert body["checks"][-1] == {"check": "DESTINATION_VALIDATION", "status": "PASSED"}
+
+
+def test_unauthorized_email_destination_is_blocked():
+    request = {
+        **VALID_REQUEST,
+        "parameters": {"to": "user@evil-external.com", "subject": "Support", "body": "Hello"},
+    }
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "DEST-001"
+    assert body["reason"] == "Destination domain 'evil-external.com' is not allowed"
+    assert body["checks"][-1] == {"check": "DESTINATION_VALIDATION", "status": "FAILED"}
+
+    # earlier stages must have passed before destination validation ran
+    earlier_checks = body["checks"][:-1]
+    assert all(c["status"] == "PASSED" for c in earlier_checks)
+
+
+def test_non_email_tool_bypasses_destination_validation():
+    request = {
+        "agent_id": "support-bot-3",
+        "tool": "search_customer",
+        "parameters": {"customer_id": "12345"},
+    }
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "ALLOW"
+    assert body["checks"][-1] == {"check": "DESTINATION_VALIDATION", "status": "PASSED"}
