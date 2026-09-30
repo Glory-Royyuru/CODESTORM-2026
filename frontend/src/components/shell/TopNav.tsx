@@ -77,13 +77,14 @@ export default function TopNav() {
             {theme === "dark" ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
           </button>
           <a
-            href="https://github.com/DavidHDev/react-bits"
+            href="https://github.com/Glory-Royyuru/CODESTORM-2026"
             target="_blank"
             rel="noreferrer"
+            title="SATG source on GitHub"
             className="hidden h-10 items-center gap-2 rounded-xl border border-line bg-surface px-3.5 text-[14px] font-semibold text-fg transition-colors hover:bg-surface-hover md:flex"
           >
             <GitHubIcon className="h-[18px] w-[18px]" />
-            48.4K
+            GitHub
           </a>
           <button
             type="button"

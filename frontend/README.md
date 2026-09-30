@@ -72,7 +72,7 @@ When the app loads, it replays ~40 realistic calls (`src/lib/gateway/seed.ts`), 
 | Approvals | `/approvals` | Approve/reject held calls; two approvals issue a single-use signed grant | `src/components/approvals/` |
 | Docs | `/docs` | Architecture summary and what is real vs simulated | `src/components/docs/` |
 
-Always visible in the header: the backend health indicator (`GET /health`), the **Kill Switch** of the demo engine (simulation only — it does not affect the backend), the theme toggle and the GitHub counter.
+Always visible in the header: the backend health indicator (`GET /health`), the **Kill Switch** of the demo engine (simulation only — it does not affect the backend), the theme toggle and a link to this project's GitHub repository.
 
 ## Folder map
 

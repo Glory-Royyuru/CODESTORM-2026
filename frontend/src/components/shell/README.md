@@ -3,7 +3,7 @@
 | File | What it does |
 | --- | --- |
 | `AppShell.tsx` | Used by `src/app/layout.tsx`. Before hydration it shows "Booting gateway engine…" (the engine must only run in the browser). After that it renders the animated background, `TopNav`, the page content (centered, max 1596 px wide) and `Toasts`. It also writes the current theme to `<html data-theme>`. When the kill switch is on, it passes red settings to the background so the ribbon turns red and speeds up. |
-| `TopNav.tsx` | Sticky header. Left: logo + the `NAV` links (the active one gets a sliding pill via Framer Motion `layoutId`; Approvals shows a count of pending requests). Right: backend status, kill switch, theme toggle, GitHub 48.4K. Below 1280 px the links collapse into a menu button that opens a drop-down panel. |
+| `TopNav.tsx` | Sticky header. Left: logo + the `NAV` links (the active one gets a sliding pill via Framer Motion `layoutId`; Approvals shows a count of pending requests). Right: backend status, kill switch, theme toggle, GitHub link to this repository. Below 1280 px the links collapse into a menu button that opens a drop-down panel. |
 | `BackendStatus.tsx` | Polls the real SATG backend's `GET /health` (via `/api/satg/health`) every 15 s: online / degraded / offline. |
 | `SimulationNotice.tsx` | Banner on every screen except the Live Gateway, saying the screen runs on the in-browser demo engine and is not authoritative. |
 | `KillSwitch.tsx` | **Demo engine only** (labelled `SIM`; the backend has no kill-switch API). Toggles the simulated gateway between `ENFORCING` and `FAIL_CLOSED`. When engaging it immediately sends a probe call to prove the next call is blocked (and shows the latency, ~1 ms, in a toast). Pulses red while engaged. |
