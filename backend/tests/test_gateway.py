@@ -106,3 +106,87 @@ def test_unauthorized_agent_is_blocked():
     assert body["verdict"] == "BLOCK"
     assert body["rule_id"] == "TOOL-003"
     assert body["reason"] == "Agent is not authorized to use this tool"
+
+
+# --- Phase 3: parameter/schema validation ---
+
+
+def test_valid_parameters_returns_allow():
+    response = client.post("/api/tool-call", json=VALID_REQUEST)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "ALLOW"
+    assert body["rule_id"] == "BASE-001"
+
+    check_names = [c["check"] for c in body["checks"]]
+    assert check_names == [
+        "REQUEST_STRUCTURE",
+        "TOOL_REGISTRY",
+        "TOOL_ENABLED",
+        "AGENT_PERMISSION",
+        "PARAMETER_VALIDATION",
+    ]
+    assert all(c["status"] == "PASSED" for c in body["checks"])
+
+
+def test_missing_required_parameter_is_blocked():
+    request = {
+        **VALID_REQUEST,
+        "parameters": {"to": "user@company.com", "subject": "Support"},
+    }
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "PARAM-001"
+    assert body["reason"] == "Required parameter 'body' is missing"
+    assert body["checks"][-1] == {"check": "PARAMETER_VALIDATION", "status": "FAILED"}
+
+
+def test_wrong_parameter_type_is_blocked():
+    request = {
+        **VALID_REQUEST,
+        "parameters": {"to": "user@company.com", "subject": "Support", "body": 12345},
+    }
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "PARAM-002"
+    assert body["reason"] == "Parameter 'body' must be a string"
+
+
+def test_unexpected_parameter_is_blocked():
+    request = {
+        **VALID_REQUEST,
+        "parameters": {
+            "to": "user@company.com",
+            "subject": "Support",
+            "body": "Hello",
+            "admin_password": "secret",
+        },
+    }
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "PARAM-003"
+    assert body["reason"] == "Unexpected parameter 'admin_password'"
+
+
+def test_empty_required_parameter_is_blocked():
+    request = {
+        **VALID_REQUEST,
+        "parameters": {"to": "user@company.com", "subject": "Support", "body": "   "},
+    }
+    response = client.post("/api/tool-call", json=request)
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["verdict"] == "BLOCK"
+    assert body["rule_id"] == "PARAM-004"
+    assert body["reason"] == "Required parameter 'body' cannot be empty"
