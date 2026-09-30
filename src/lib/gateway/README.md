@@ -1,6 +1,8 @@
-# `src/lib/gateway/` — the gateway engine
+# `src/lib/gateway/` — the in-browser demo engine
 
-Pure TypeScript, no React. Everything the UI shows comes from here. It runs in the browser (and in Node for the `scripts/` checks).
+> **Simulation.** This engine powers the simulated screens (Provenance, Registry, Audit, Eval Lab, Policies, Approvals, kill switch). It is **not** used by the Live Gateway, whose verdicts come only from the real SATG backend (`backend/`, via `src/lib/satg/`). Nothing here is a security authority.
+
+Pure TypeScript, no React. It runs in the browser (and in Node for the `scripts/` checks).
 
 ## How one tool call flows
 

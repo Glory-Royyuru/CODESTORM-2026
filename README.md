@@ -3,20 +3,52 @@
 A Next.js app that demonstrates a zero-trust firewall sitting between AI agents and the tools they call.
 The visual style comes from the React Bits landing page (dark background, orange glow ribbon, cursor-reactive dot grid, glass panels).
 
-Everything runs **in the browser**: there is no backend. A TypeScript "gateway engine" (`src/lib/gateway/`) makes real decisions — parsing, policy rules, taint tracking, ML scoring, Ed25519 signing — and every screen reads from it.
+The **Live Gateway** (`/`) is connected to the real SATG backend in [`backend/`](backend/README.md) — the FastAPI Phase 1–5 deterministic gateway. The backend is the only security authority: the console sends the request, shows the backend's verdict, and never decides anything itself. No tool is executed.
+
+All **other screens** (Provenance, Registry, Audit, Eval Lab, Policies, Approvals, the kill switch) still run on an in-browser TypeScript demo engine (`src/lib/gateway/`) and are labelled as simulations in the UI.
 
 ## Run it
 
+Two terminals:
+
 ```bash
+# 1 — SATG backend (http://127.0.0.1:8000)
+cd backend
+venv\Scripts\activate            # Windows (source venv/bin/activate on macOS/Linux)
+uvicorn app.main:app --reload
+
+# 2 — console (http://localhost:3000)
 npm install
-npm run dev          # http://localhost:3000
-npm run build        # production build (typecheck + static pages)
-npm run lint
-npm run check:engine # print every seeded decision + verify the receipt chain
-npm run check:bench  # run the benchmark suites headlessly
+npm run dev
 ```
 
-## The mental model (read this first)
+The console reaches the backend through its own same-origin proxy, so no CORS setup is needed. To point it at a different backend, set `SATG_BACKEND_URL` (server-side, default `http://127.0.0.1:8000`) before `npm run dev` / `npm start`. If the backend is down, the Live Gateway shows a network error and no verdict.
+
+Other checks:
+
+```bash
+npm run build        # production build (typecheck + static pages)
+npm run lint
+npm run check:engine # demo engine: print every seeded decision + verify the receipt chain
+npm run check:bench  # demo engine: run the benchmark suites headlessly
+cd backend && python -m pytest -q
+```
+
+## How the Live Gateway talks to the backend
+
+```
+browser ──POST /api/satg/v1/toolcalls──▶ Next.js route handler ──POST /v1/toolcalls──▶ FastAPI SATG backend
+        ◀── backend status + body, unchanged ──                  ◀── Verdict (ALLOW / BLOCK) ──
+```
+
+- `src/app/api/satg/v1/toolcalls/route.ts` and `src/app/api/satg/health/route.ts` forward to the backend (`src/lib/satg/proxy.ts`). The raw request bytes and `Content-Type` are forwarded unchanged, so the backend's strict ingress judges exactly what the user typed. The backend's status code and body are relayed unchanged.
+- If the backend cannot be reached, the proxy answers `502`/`504` with an `x-satg-proxy-error` header and **no verdict**.
+- `src/lib/satg/client.ts` validates every response against the backend's `Verdict` model. Anything else (wrong shape, unknown verdict, an `ALLOW` on a non-200 status) is shown as a backend error, never as a verdict.
+- `src/lib/satg/presets.ts` holds example request bodies built from the backend's registered tools. They are inputs only; the result always comes from the backend.
+
+## The mental model of the demo engine (read this first)
+
+> This section describes the full 11-module design as implemented by the in-browser demo engine. The real backend currently implements the deterministic front half (ingress → canonicalize → registry → parameters → destination → policy decision → audit) and returns ALLOW/BLOCK only.
 
 1. An **agent** (e.g. `agent:research-assistant@v3.2`) works for a **user** (e.g. `u_maya`) inside a **session** that has a goal ("Summarize the Q3 partner report…") and a short-lived token listing what it may do (`db:read`, `email:send`, …).
 2. Every tool call the agent makes (a JSON payload in MCP, OpenAI-function or REST format) goes through the gateway **pipeline**:
@@ -37,7 +69,7 @@ When the app loads, it replays ~40 realistic calls (`src/lib/gateway/seed.ts`), 
 
 | Nav item | Route | What you do there | Code |
 | --- | --- | --- | --- |
-| Live Gateway | `/` | Pick an attack scenario, edit its payload, press **Execute Through Gateway**, watch the 9 stages light up | `src/components/gateway/` |
+| Live Gateway | `/` | **Real backend.** Pick an example request (or edit the raw body), press **Send Through Gateway**, see the backend's checks and verdict | `src/components/gateway/`, `src/lib/satg/` |
 | Provenance DAG | `/provenance` | Pick a session, see its graph of prompts → tool calls → data → external targets, click nodes | `src/components/provenance/` |
 | Tool Registry | `/registry` | See each tool's pinned hash and status; simulate a rug-pull; register a new tool | `src/components/registry/` |
 | Audit Ledger | `/audit` | Browse all receipts, verify the whole chain, open one and verify / tamper-test it | `src/components/audit/` |
@@ -46,7 +78,7 @@ When the app loads, it replays ~40 realistic calls (`src/lib/gateway/seed.ts`), 
 | Approvals | `/approvals` | Approve/reject held calls; two approvals issue a single-use signed grant | `src/components/approvals/` |
 | Docs | `/docs` | Architecture summary and what is real vs simulated | `src/components/docs/` |
 
-Always visible in the header: the **Kill Switch** (puts the gateway into `FAIL_CLOSED` — everything is blocked and the background ribbon turns red), the theme toggle and the GitHub counter.
+Always visible in the header: the backend health indicator (`GET /health`), the **Kill Switch** of the demo engine (simulation only — it does not affect the backend), the theme toggle and the GitHub counter.
 
 ## Folder map
 
@@ -58,8 +90,9 @@ reactbits-hero/
     ├── app/           Next.js routes — each page.tsx just renders a View component
     ├── components/    all UI, one folder per screen + shared shell/ui/hero
     └── lib/
-        ├── store.ts   connects React to the engine; UI state (theme, toasts)
-        └── gateway/   the engine itself — one file per security module
+        ├── store.ts   connects React to the demo engine; UI state (theme, toasts)
+        ├── satg/      real backend integration: proxy, client, request presets
+        └── gateway/   the in-browser demo engine — one file per security module
 ```
 
 Every folder has its own README with more detail. Suggested reading order:
@@ -67,7 +100,8 @@ Every folder has its own README with more detail. Suggested reading order:
 
 ## What is real and what is simulated
 
-- **Real:** JSON parsing and limits, protocol adapters, the multi-layer decoder, all policy rules, taint tracking, the ML models (small, but genuine — e.g. an isolation forest trained at startup), SHA-256 hashing, Ed25519 signatures, the hash chain, approval grants, policy replay.
+- **Real security decisions:** only the SATG backend (`backend/`), used by the Live Gateway. See [backend/README.md](backend/README.md) for its checks and rule IDs.
+- **Demo engine (every other screen), real code but not authoritative:** JSON parsing and limits, protocol adapters, the multi-layer decoder, all policy rules, taint tracking, the ML models (small, but genuine — e.g. an isolation forest trained at startup), SHA-256 hashing, Ed25519 signatures, the hash chain, approval grants, policy replay.
 - **Simulated:** tool execution (scripted outputs), the sandbox container and Vault secrets, stage latencies (modelled production costs + measured browser time), and the benchmark suites (synthetic cases shaped like AgentDojo / InjecAgent / MCPTox / agent-egress-bench, not the real datasets).
 - State lives in memory and **resets on page reload**. A new Ed25519 signing key is generated each load.
 
