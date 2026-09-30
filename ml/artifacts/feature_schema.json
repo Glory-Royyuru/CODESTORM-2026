@@ -1,0 +1,96 @@
+{
+  "feature_version": "1.0",
+  "fusion_features": [
+    "p_inject",
+    "p_misaligned",
+    "anomaly_score",
+    "sequence_surprisal",
+    "context_shift",
+    "tool_risk_tier",
+    "session_step_count",
+    "unique_tool_count",
+    "destination_change_count",
+    "argument_size",
+    "observation_size"
+  ],
+  "signal_features": [
+    "p_inject",
+    "p_misaligned",
+    "anomaly_score",
+    "sequence_surprisal",
+    "context_shift"
+  ],
+  "context_features": [
+    "tool_risk_tier",
+    "session_step_count",
+    "unique_tool_count",
+    "destination_change_count",
+    "argument_size",
+    "observation_size"
+  ],
+  "monotone_constraints": {
+    "p_inject": 1,
+    "p_misaligned": 1,
+    "anomaly_score": 1,
+    "sequence_surprisal": 1,
+    "context_shift": 1,
+    "tool_risk_tier": 0,
+    "session_step_count": 0,
+    "unique_tool_count": 0,
+    "destination_change_count": 0,
+    "argument_size": 0,
+    "observation_size": 0
+  },
+  "injection_model_input": {
+    "order": [
+      "emb_observation[384]",
+      "emb_action[384]",
+      "task_observation_similarity",
+      "task_action_similarity",
+      "task_tool_description_similarity",
+      "observation_action_similarity",
+      "instruction_keyword_count",
+      "imperative_keyword_count",
+      "external_destination_count",
+      "url_count",
+      "email_count",
+      "encoded_string_count",
+      "argument_length",
+      "observation_length"
+    ],
+    "dim": 780
+  },
+  "misalignment_model_input": {
+    "order": [
+      "task_observation_similarity",
+      "task_action_similarity",
+      "task_tool_description_similarity",
+      "observation_action_similarity",
+      "instruction_keyword_count",
+      "imperative_keyword_count",
+      "external_destination_count",
+      "url_count",
+      "email_count",
+      "encoded_string_count",
+      "argument_length",
+      "observation_length",
+      "emb_task*emb_action[384]"
+    ],
+    "dim": 396
+  },
+  "isolation_forest_input": [
+    "number_of_steps",
+    "unique_tools",
+    "tool_switch_rate",
+    "repeated_tool_rate",
+    "argument_length",
+    "observation_length",
+    "new_destination_count",
+    "external_domain_count",
+    "sensitive_action_count",
+    "action_frequency",
+    "tool_transition_frequency"
+  ],
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "cusum_input": "max(p_inject, p_misaligned)"
+}

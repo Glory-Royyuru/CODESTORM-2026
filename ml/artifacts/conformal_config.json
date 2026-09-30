@@ -1,0 +1,16 @@
+{
+  "method": "Mondrian (class-conditional) split conformal, LAC nonconformity s = 1 - p_y",
+  "alpha": 0.05,
+  "target_coverage": 0.95,
+  "q_class0": 0.35668790340423584,
+  "q_class1": 0.9230769202113152,
+  "n_class0": 2925,
+  "n_class1": 863,
+  "abstain_rule": "abstain iff prediction set {y : 1 - p_y <= q_y} is not a singleton",
+  "uncertainty_region_fused_risk": [
+    0.07692307978868484,
+    0.35668790340423584
+  ],
+  "calibration_set": "validation part B (task-disjoint from fusion fitting and from isotonic calibration)",
+  "note": "Split-conformal style uncertainty flag; not a full conformal risk-control framework."
+}

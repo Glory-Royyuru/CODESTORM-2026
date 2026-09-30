@@ -1,0 +1,24 @@
+{
+  "description": "Deterministic tool risk tier used as a context feature (plan §18). 1 = read-only, 2 = local state change, 3 = outbound / irreversible / privileged. Explicit overrides win; otherwise the first matching verb prefix is used; unknown tools default to 2.",
+  "default_tier": 2,
+  "overrides": {
+    "add_beneficiary": 3, "transfer_money": 3, "pay_bill": 3, "delete_beneficiary": 3, "apply_loan": 3,
+    "send_email": 3, "forward_email": 3, "reply_email": 3, "schedule_email": 3, "delete_email": 3,
+    "execute_command": 3, "git_push": 3, "install_package": 3, "delete_file": 3,
+    "submit_form": 3, "fill_form": 2, "login_site": 3, "download_file": 2, "download_attachment": 2,
+    "send_patient_message": 3, "create_prescription": 3, "update_patient_record": 3, "submit_claim": 3,
+    "create_referral": 3, "add_contact": 2, "create_filter": 2, "unsubscribe": 2,
+    "freeze_card": 2, "unfreeze_card": 3, "dispute_transaction": 2, "open_savings": 2, "set_alert": 2,
+    "convert_currency": 1, "compare_prices": 1, "check_availability": 1, "translate_page": 1,
+    "summarize_thread": 1, "take_screenshot": 1, "copy_text": 1, "bookmark_page": 1
+  },
+  "verb_prefix_tiers": [
+    ["get_", 1], ["read_", 1], ["search_", 1], ["list_", 1], ["check_", 1], ["extract_", 1],
+    ["scroll_", 1], ["go_", 1], ["open_", 2], ["close_", 2], ["click_", 2], ["git_log", 1], ["git_diff", 1],
+    ["debug_", 1], ["format_", 2], ["run_", 2], ["create_", 2], ["write_", 2], ["update_", 2],
+    ["record_", 2], ["schedule_", 2], ["order_", 2], ["add_", 2], ["cancel_", 2], ["move_", 2],
+    ["mark_", 1], ["git_commit", 2], ["git_pull", 2], ["logout_", 1],
+    ["send_", 3], ["forward_", 3], ["delete_", 3], ["transfer_", 3], ["pay_", 3], ["execute_", 3],
+    ["upload_", 3], ["share_", 3], ["post_", 3], ["submit_", 3], ["grant_", 3], ["export_", 3]
+  ]
+}

@@ -1,0 +1,11 @@
+# SATG Core ML (CPU). Versions verified on Python 3.14.3 / Windows 11.
+numpy>=2.0
+scikit-learn>=1.5
+xgboost>=2.1
+torch>=2.3
+transformers>=4.44
+joblib>=1.4
+onnx>=1.16
+onnxruntime>=1.18
+skl2onnx>=1.17
+pytest>=8.0
