@@ -1,12 +1,14 @@
-# PNC3 — Secure Agent Tool Gateway
+# `backend/` — PNC3 Secure Agent Tool Gateway (FastAPI)
 
 A security gateway that intercepts AI agent tool calls, validates them, and returns an ALLOW/BLOCK verdict before any tool executes.
+
+This directory is the **security authority** of the repository. The console in [`../frontend/`](../frontend/README.md) calls `POST /v1/toolcalls` and `GET /health` through its same-origin Next.js proxy and only displays the verdicts returned here; it makes no security decisions. See the [root README](../README.md) for running both together.
 
 ## Current Scope
 
 The gateway implements the deterministic front half of the SATG architecture: strict ingress, canonicalization, the tool registry with manifest integrity, parameter/schema validation, destination (egress) validation, a single deterministic policy decision point, and an audit record for every decision.
 
-**No tool is executed.** The gateway only returns a verdict. Execution, response inspection/DLP, ML scoring, authentication, rate limiting, persistence, and the console belong to later work packages.
+**No tool is executed.** The gateway only returns a verdict. Execution, response inspection/DLP, ML scoring, authentication, rate limiting and persistence belong to later work packages.
 
 ## Request Flow
 
