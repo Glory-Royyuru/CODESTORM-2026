@@ -2,27 +2,19 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ChevronDown, Loader2, Play, RotateCcw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { cx, VerdictBadge } from "@/components/ui/primitives";
-import { toWire } from "@/lib/gateway/ingress";
-import { runScript, scenarioScript } from "@/lib/gateway/runner";
-import { SCENARIOS, type Scenario } from "@/lib/gateway/scenarios";
-import type { PipelineResult, Protocol, SessionState, Verdict } from "@/lib/gateway/types";
-import { getGateway } from "@/lib/store";
+import { BACKEND_ENDPOINT, type SatgOutcome } from "@/lib/satg/client";
+import { PRESETS, type RequestPreset } from "@/lib/satg/presets";
 
 export interface StudioRun {
-  scenario: Scenario;
-  session: SessionState;
-  results: PipelineResult[];
+  preset: RequestPreset;
+  requestBody: string;
+  outcome: SatgOutcome;
   runId: number;
 }
 
-const PROTOCOLS: Protocol[] = ["MCP", "OPENAI", "REST"];
-
-const finalWire = (s: Scenario, protocol: Protocol) => {
-  const last = s.steps[s.steps.length - 1];
-  return toWire(protocol, last.tool, last.args);
-};
+const INGRESS_LIMIT_BYTES = 64 * 1024;
 
 /** Tiny JSON highlighter for the payload preview underlay. */
 function highlight(json: string) {
@@ -34,13 +26,12 @@ function highlight(json: string) {
   });
 }
 
-export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (run: StudioRun) => void }) {
-  const [scenario, setScenario] = useState<Scenario>(SCENARIOS[0]);
-  const [protocol, setProtocol] = useState<Protocol>(SCENARIOS[0].protocol);
-  const [payload, setPayload] = useState(() => finalWire(SCENARIOS[0], SCENARIOS[0].protocol));
+/** Request editor: pick an example, edit the raw body, send it to the real SATG backend. */
+export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (preset: RequestPreset, body: string) => void }) {
+  const [preset, setPreset] = useState<RequestPreset>(PRESETS[0]);
+  const [payload, setPayload] = useState(PRESETS[0].body);
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const runSeq = useRef(0);
   const preRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -50,20 +41,15 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (r
     return () => document.removeEventListener("pointerdown", close);
   }, [menu]);
 
-  const choose = (s: Scenario) => {
-    setScenario(s);
-    setProtocol(s.protocol);
-    setPayload(finalWire(s, s.protocol));
+  const choose = (p: RequestPreset) => {
+    setPreset(p);
+    setPayload(p.body);
     setMenu(false);
   };
 
-  const execute = () => {
-    const gw = getGateway();
-    const res = runScript(gw, scenarioScript({ ...scenario, protocol }), { finalRaw: payload, gapMs: 900 });
-    onRun({ scenario, ...res, runId: ++runSeq.current });
-  };
-
-  const edited = payload !== finalWire(scenario, protocol);
+  const edited = payload !== preset.body;
+  const bytes = new TextEncoder().encode(payload).length;
+  const [expectedVerdict, ...expectedRule] = preset.expected.split(" · ");
 
   return (
     <motion.div
@@ -84,7 +70,7 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (r
             type="button"
             aria-label="Reset payload"
             title="Reset payload"
-            onClick={() => setPayload(finalWire(scenario, protocol))}
+            onClick={() => setPayload(preset.body)}
             className="group grid h-9 w-10 place-items-center rounded-lg border border-line bg-surface text-fg/70 hover:bg-surface-hover hover:text-fg"
           >
             <RotateCcw className="h-4 w-4 transition-transform duration-500 group-active:-rotate-180" />
@@ -95,10 +81,10 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (r
               aria-haspopup="menu"
               aria-expanded={menu}
               onClick={() => setMenu((m) => !m)}
-              className="flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-line bg-surface px-3 font-mono text-[13px] text-fg/80 hover:bg-surface-hover sm:max-w-none"
+              className="flex h-9 max-w-[240px] items-center gap-2 rounded-lg border border-line bg-surface px-3 font-mono text-[13px] text-fg/80 hover:bg-surface-hover sm:max-w-none"
             >
-              <span className="rounded bg-accent/20 px-1.5 text-[11px] font-bold text-accent">{scenario.id}</span>
-              <span className="truncate">{scenario.short}</span>
+              <span className="rounded bg-accent/20 px-1.5 text-[11px] font-bold text-accent">{preset.group}</span>
+              <span className="truncate">{preset.title}</span>
               <ChevronDown className={cx("h-4 w-4 shrink-0 transition-transform", menu && "rotate-180")} />
             </button>
             <AnimatePresence>
@@ -109,25 +95,28 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (r
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -6, scale: 0.97 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-11 z-30 w-[min(430px,85vw)] origin-top-right rounded-xl border border-line bg-panel-strong p-1.5 shadow-2xl backdrop-blur-xl"
+                  className="scrollbar-thin absolute right-0 top-11 z-30 max-h-[min(560px,70vh)] w-[min(460px,85vw)] origin-top-right overflow-y-auto rounded-xl border border-line bg-panel-strong p-1.5 shadow-2xl backdrop-blur-xl"
                 >
-                  <li className="px-2.5 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-subtle">Attack scenarios</li>
-                  {SCENARIOS.map((s) => (
-                    <li key={s.id}>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => choose(s)}
-                        className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-surface-hover"
-                      >
-                        <span className="mt-0.5 rounded bg-accent/15 px-1.5 font-mono text-[11px] font-bold text-accent">{s.id}</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[13.5px] font-medium text-fg">{s.title.replace(/^Scenario .: /, "")}</span>
-                          <span className="block text-[12px] text-subtle">{s.expected}</span>
-                        </span>
-                        {s.id === scenario.id && <Check className="mt-0.5 h-4 w-4 text-accent" />}
-                      </button>
-                    </li>
+                  {PRESETS.map((p, i) => (
+                    <Fragment key={p.id}>
+                      {(i === 0 || PRESETS[i - 1].group !== p.group) && (
+                        <li className="px-2.5 pb-1.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-subtle">{p.group}</li>
+                      )}
+                      <li>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => choose(p)}
+                          className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-surface-hover"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[13.5px] font-medium text-fg">{p.title}</span>
+                            <span className="block font-mono text-[11.5px] text-subtle">designed to trigger {p.expected}</span>
+                          </span>
+                          {p.id === preset.id && <Check className="mt-0.5 h-4 w-4 text-accent" />}
+                        </button>
+                      </li>
+                    </Fragment>
                   ))}
                 </motion.ul>
               )}
@@ -137,46 +126,26 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (r
       </div>
 
       <div className="space-y-4 p-5">
-        <p className="text-[13.5px] leading-relaxed text-muted">{scenario.description}</p>
+        <p className="text-[13.5px] leading-relaxed text-muted">{preset.description}</p>
 
-        {/* context steps */}
-        <div>
-          <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.12em] text-subtle">Session · {scenario.principal.agentId} → {scenario.principal.userId}</p>
-          <ol className="space-y-1.5">
-            <li className="flex items-center gap-2 font-mono text-[12.5px]">
-              <span className="w-5 text-subtle">0</span>
-              <span className="text-subtle">goal</span>
-              <span className="truncate text-fg/80">“{scenario.goal}”</span>
-            </li>
-            {scenario.steps.map((s, i) => (
-              <li key={i} className="flex items-center gap-2 font-mono text-[12.5px]">
-                <span className="w-5 text-subtle">{i + 1}</span>
-                <span className={cx(i === scenario.steps.length - 1 ? "text-accent" : "text-code-ident")}>{s.tool}</span>
-                <span className="truncate text-subtle">{i === scenario.steps.length - 1 ? "← payload below (editable)" : s.note}</span>
-              </li>
-            ))}
-          </ol>
+        {/* request line */}
+        <div className="space-y-1.5 font-mono text-[12.5px]">
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-emerald-400/10 px-1.5 font-semibold text-emerald-300 ring-1 ring-emerald-400/30">LIVE</span>
+            <span className="text-fg/85">{BACKEND_ENDPOINT}</span>
+            <span className="text-subtle">· FastAPI SATG backend via /api/satg</span>
+          </p>
+          <p className="text-[11.5px] text-subtle">agent_id is self-asserted (no authentication yet) · the gateway returns a verdict only — no tool is executed</p>
         </div>
 
-        {/* protocol + payload editor */}
+        {/* payload editor */}
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex rounded-lg border border-line bg-surface p-0.5">
-              {PROTOCOLS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => {
-                    setProtocol(p);
-                    setPayload(finalWire(scenario, p));
-                  }}
-                  className={cx("rounded-md px-2.5 py-1 font-mono text-[11.5px] font-semibold transition-colors", protocol === p ? "bg-accent text-[#1a0d03]" : "text-muted hover:text-fg")}
-                >
-                  {p === "OPENAI" ? "OpenAI fn" : p}
-                </button>
-              ))}
-            </div>
-            <span className="font-mono text-[11px] text-subtle">{edited ? "● edited" : `${new TextEncoder().encode(payload).length} B`}</span>
+            <span className="rounded-lg border border-line bg-surface px-2.5 py-1 font-mono text-[11.5px] font-semibold text-muted">application/json · raw body</span>
+            <span className={cx("font-mono text-[11px]", bytes > INGRESS_LIMIT_BYTES ? "text-red-300" : "text-subtle")}>
+              {edited ? "● edited · " : ""}
+              {bytes} B{bytes > INGRESS_LIMIT_BYTES ? " (over the 64 KiB ingress limit)" : ""}
+            </span>
           </div>
           <div className="relative h-[210px] overflow-hidden rounded-xl border border-line bg-black/30 focus-within:ring-2 focus-within:ring-accent/50">
             <pre ref={preRef} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-all p-4 font-mono text-[12.5px] leading-[1.65]">
@@ -188,25 +157,28 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (r
               onChange={(e) => setPayload(e.target.value)}
               onScroll={(e) => preRef.current && (preRef.current.scrollTop = e.currentTarget.scrollTop)}
               spellCheck={false}
-              aria-label="Raw tool-call payload"
+              aria-label="Raw tool-call request body"
               className="scrollbar-thin absolute inset-0 h-full w-full resize-none whitespace-pre-wrap break-all bg-transparent p-4 font-mono text-[12.5px] leading-[1.65] text-transparent caret-accent outline-none selection:bg-accent/30"
             />
           </div>
-          <p className="mt-2 text-[12px] text-subtle">Tip: try a duplicate JSON key, nesting deeper than 16, or an SSRF URL — ingress and policy react to your edits.</p>
+          <p className="mt-2 text-[12px] text-subtle">
+            The body is sent byte-for-byte. Try a duplicate key, nesting deeper than 8, NaN, an unknown field, or a recipient outside company.com — the backend decides.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={execute}
+            onClick={() => onRun(preset, payload)}
             disabled={busy}
             className="group inline-flex h-12 flex-1 items-center justify-center gap-2.5 rounded-xl bg-accent px-6 text-[15.5px] font-semibold text-[#1a0d03] shadow-[0_10px_40px_-10px_rgba(249,115,22,0.7),inset_0_1px_0_rgba(255,255,255,0.25)] transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-            {busy ? "Executing through gateway…" : "Execute Through Gateway"}
+            {busy ? "Waiting for SATG backend…" : "Send Through Gateway"}
           </button>
-          <span className="flex items-center gap-2 text-[12px] text-subtle">
-            expected <VerdictBadge verdict={scenario.expected.split(" ")[0] as Verdict} />
+          <span className="flex items-center gap-2 text-[12px] text-subtle" title="What this example is designed to trigger — not a result">
+            designed for <VerdictBadge verdict={expectedVerdict === "ALLOW" ? "ALLOW" : "BLOCK"} />
+            <span className="font-mono">{expectedRule.join(" · ")}</span>
           </span>
         </div>
       </div>

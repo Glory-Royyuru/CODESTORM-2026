@@ -1,9 +1,12 @@
 "use client";
 
 import { motion, type Variants } from "framer-motion";
-import { ArrowRight, FileSignature, Gauge, ShieldBan } from "lucide-react";
+import { ArrowRight, Ban, ServerCog, ShieldBan } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { categorize, submitToolCall } from "@/lib/satg/client";
+import { useSatgLog } from "@/lib/satg/log";
+import type { RequestPreset } from "@/lib/satg/presets";
 import { useUi } from "@/lib/store";
 import AttackStudio, { type StudioRun } from "./AttackStudio";
 import LiveTelemetry from "./LiveTelemetry";
@@ -16,32 +19,46 @@ const item: Variants = {
 };
 
 const STATS = [
-  { icon: Gauge, label: "< 15ms Latency" },
-  { icon: ShieldBan, label: "100% Deterministic Veto" },
-  { icon: FileSignature, label: "Ed25519 Signed" },
+  { icon: ServerCog, label: "Live FastAPI Backend" },
+  { icon: ShieldBan, label: "Deterministic Fail-Closed Veto" },
+  { icon: Ban, label: "Verdict Only · No Execution" },
 ];
 
 export default function GatewayView() {
   const [run, setRun] = useState<StudioRun | null>(null);
   const [busy, setBusy] = useState(false);
+  const runSeq = useRef(0);
   const toast = useUi((s) => s.toast);
+  const log = useSatgLog((s) => s.add);
 
-  const onRun = (r: StudioRun) => {
+  const onRun = async (preset: RequestPreset, body: string) => {
     setBusy(true);
-    setRun(r);
+    // The verdict comes only from the backend; errors are shown as errors, never as a verdict.
+    const outcome = await submitToolCall(body);
+    log(preset.title, outcome);
+    setRun({ preset, requestBody: body, outcome, runId: ++runSeq.current });
     document.getElementById("pipeline")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const onDone = useCallback(() => {
     setBusy(false);
     if (!run) return;
-    const b = run.results[run.results.length - 1].entry.receipt.body;
-    const tone = b.verdict === "ALLOW" ? "success" : b.verdict === "MONITOR" ? "info" : b.verdict === "BLOCK" || b.verdict === "QUARANTINE" ? "danger" : "warn";
-    toast({
-      tone,
-      title: `${b.tool} → ${b.verdict}`,
-      detail: `${b.findings.map((f) => f.ruleId).join(", ") || "no rule fired"} · ${b.totalLatencyMs}ms · receipt #${b.seq}`,
-    });
+    const o = run.outcome;
+    const category = categorize(o);
+    if (o.kind === "verdict") {
+      const v = o.verdict;
+      toast({
+        tone: category === "ALLOWED" ? "success" : category === "BLOCKED" ? "danger" : "warn",
+        title: `${v.tool ?? "request"} → ${v.verdict}`,
+        detail: `${v.rule_id} · ${v.reason} · ${o.roundTripMs}ms${category === "ALLOWED" ? " · not executed" : ""}`,
+      });
+    } else {
+      toast({
+        tone: "warn",
+        title: o.kind === "network_error" ? "SATG backend unreachable — no verdict" : `Backend error (HTTP ${o.httpStatus}) — no verdict`,
+        detail: o.message,
+      });
+    }
   }, [run, toast]);
 
   return (
@@ -53,9 +70,9 @@ export default function GatewayView() {
               href="/provenance"
               className="group inline-flex items-center gap-3 rounded-[10px] border border-line bg-surface p-[6px] pr-4 backdrop-blur-sm transition-colors hover:bg-surface-hover"
             >
-              <span className="rounded-md bg-accent px-3 py-[6px] text-[13.5px] font-medium text-[#1a0d03]">NEW MODULE</span>
+              <span className="rounded-md bg-accent px-3 py-[6px] text-[13.5px] font-medium text-[#1a0d03]">SIMULATION</span>
               <span className="flex items-center gap-2 text-[13.5px] font-medium text-fg/85">
-                LETHAL-TRIFECTA FIREWALL
+                LETHAL-TRIFECTA PREVIEW
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </span>
             </Link>
@@ -68,8 +85,8 @@ export default function GatewayView() {
           </motion.h1>
 
           <motion.p variants={item} className="mt-7 max-w-[680px] text-[clamp(1.05rem,1.2vw,1.3rem)] leading-[1.55] text-muted">
-            SATG sits synchronously between agents and their tools — deterministic hard vetoes, provenance-aware taint tracking and calibrated ML
-            that can only ever escalate. Every decision fails closed and ships an Ed25519-signed receipt.
+            SATG sits synchronously between agents and their tools. This console talks to the live SATG backend: strict ingress, canonicalization,
+            a hash-pinned tool registry, parameter and destination validation, and one deterministic policy decision — every request fails closed.
           </motion.p>
 
           <motion.ul variants={item} className="mt-8 flex flex-wrap gap-2.5">
@@ -94,12 +111,12 @@ export default function GatewayView() {
               className="inline-flex h-[56px] items-center gap-3 rounded-xl border border-[#fb923c]/40 bg-[#f97316]/75 px-7 text-[17px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] backdrop-blur-md transition-colors hover:bg-[#f97316]/90"
             >
               Audit Ledger
-              <span className="font-mono text-[13px] font-medium text-white/60">Ed25519</span>
+              <span className="font-mono text-[13px] font-medium text-white/60">simulated</span>
             </Link>
           </motion.div>
 
           <motion.p variants={item} className="mt-8 flex flex-wrap items-center gap-3 text-[13.5px] font-semibold text-subtle">
-            11 MODULES <span aria-hidden="true">·</span> 6 SECURITY ZONES <span aria-hidden="true">·</span> FAIL-CLOSED BY DEFAULT
+            6 LIVE CHECKS <span aria-hidden="true">·</span> 1 POLICY DECISION POINT <span aria-hidden="true">·</span> FAIL-CLOSED BY DEFAULT
           </motion.p>
         </motion.div>
 
