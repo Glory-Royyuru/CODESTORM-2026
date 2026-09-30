@@ -1,0 +1,57 @@
+{
+  "model_version": "satg-ml-v0.1",
+  "dataset": "AgentDrift v2.0 (github.com/Asif-0209/AgentDrift)",
+  "split": "task-disjoint",
+  "feature_version": "1.0",
+  "training_timestamp": "2026-09-30T15:14:56.922901+00:00",
+  "training_seconds": 248.3,
+  "models": {
+    "embedding": "sentence-transformers/all-MiniLM-L6-v2 (frozen, mean-pooled, L2-normalised)",
+    "injection": "StandardScaler + LogisticRegression(class_weight=balanced) on MiniLM + text features",
+    "misalignment": "StandardScaler + LogisticRegression(class_weight=balanced) on semantic alignment features",
+    "anomaly": "IsolationForest (benign-only) + empirical-CDF normalisation",
+    "sequence": "trigram (interpolated add-k) tool-transition model, benign-only",
+    "context_shift": "CUSUM on max(p_inject, p_misaligned)",
+    "fusion": "XGBoost monotone 250 trees depth 4",
+    "calibration": "isotonic",
+    "conformal": "Mondrian split conformal (LAC)"
+  },
+  "fusion_candidates": [
+    {
+      "params": {
+        "n_estimators": 150,
+        "max_depth": 3,
+        "learning_rate": 0.1
+      },
+      "val_pr_auc": 0.9336963259439701
+    },
+    {
+      "params": {
+        "n_estimators": 250,
+        "max_depth": 4,
+        "learning_rate": 0.05
+      },
+      "val_pr_auc": 0.9375583754511514
+    },
+    {
+      "params": {
+        "n_estimators": 200,
+        "max_depth": 5,
+        "learning_rate": 0.03
+      },
+      "val_pr_auc": 0.9327624373379457
+    }
+  ],
+  "anonymization": "world identities replaced with placeholders (AgentDrift leakage control)",
+  "training_rows": {
+    "train_steps": 51507,
+    "val_steps": 9721,
+    "val_A_steps": 5933,
+    "val_B_steps": 3788,
+    "test_steps": 9796
+  },
+  "onnx": {
+    "injection_model.onnx": "ok",
+    "embedding_model.onnx": "ok"
+  }
+}

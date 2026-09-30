@@ -1,0 +1,12 @@
+{
+  "description": "Mapping of calibrated fused_risk to the monotone SATG decision hierarchy (used ONLY by the integration adapter; the ML model itself never returns ALLOW/BLOCK). Deterministic BLOCK is final regardless of these values.",
+  "fused_risk": {
+    "MONITOR": 0.20,
+    "STEP_UP": 0.40,
+    "HUMAN_APPROVAL": 0.60,
+    "QUARANTINE": 0.80,
+    "BLOCK": 0.95
+  },
+  "abstain_minimum_level": "STEP_UP",
+  "binary_block_at_or_above": "QUARANTINE"
+}
