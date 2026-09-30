@@ -21,12 +21,52 @@ const CLIENT_TIMEOUT_MS = 15_000;
 /* ---------- backend contract (mirrors backend/app/models/verdict.py) ---------- */
 
 export type SatgVerdictType = "ALLOW" | "BLOCK" | "ESCALATE";
-export type SatgSeverity = "LOW" | "MEDIUM" | "HIGH";
+export type SatgSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type SatgCheckStatus = "PASSED" | "FAILED";
 
 export interface SatgCheck {
   check: string;
   status: SatgCheckStatus;
+}
+
+/** One network-boundary check for a URL destination (backend/app/gateway/network.py). */
+export interface SatgNetworkCheck {
+  check: string;
+  status: "PASSED" | "BLOCKED" | "NOT_EVALUATED";
+  detail: string | null;
+}
+
+export interface SatgNetworkInspection {
+  parameter: string;
+  requested_url: string;
+  requested_host: string | null;
+  registrable_domain: string | null;
+  resolved_ips: string[];
+  /** The execution layer must connect to this IP and never re-resolve. */
+  pinned_ip: string | null;
+  checks: SatgNetworkCheck[];
+}
+
+/** HMAC-SHA256 tag over the allowed request (ALLOW only). */
+export interface SatgRequestIntegrity {
+  algorithm: "HMAC-SHA256";
+  key_id: string;
+  signed_fields: string[];
+  signature: string;
+}
+
+/** A quarantined crypt-arithmetic anomaly (CRYPTO-* rejections). */
+export interface SatgAnomaly {
+  anomaly_id: string;
+  anomaly_type: string;
+  risk_severity: "CRITICAL" | "HIGH" | "ELEVATED";
+  rule_id: string;
+  location: string;
+  raw_payload_sha256: string;
+  raw_payload_bytes: number;
+  quarantined_hex_snippet: string;
+  parser_error_detail: string;
+  mitigation_action: "QUARANTINE_AND_HARD_DENY" | "STRIP_AND_RETRY_SANDBOX" | "ISOLATE_SESSION";
 }
 
 export interface SatgVerdict {
@@ -44,6 +84,10 @@ export interface SatgVerdict {
   tool_version: string | null;
   tool_manifest_hash: string | null;
   request_hash: string | null;
+  /** Optional in the contract: older backends omit these fields. */
+  network: SatgNetworkInspection[];
+  request_integrity: SatgRequestIntegrity | null;
+  anomalies: SatgAnomaly[];
 }
 
 /** Schema errors the backend attaches to an INGRESS-005 rejection. */
@@ -71,8 +115,62 @@ const optStr = (v: unknown): string | null => (typeof v === "string" ? v : null)
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): v is T => typeof v === "string" && (allowed as readonly string[]).includes(v);
 
 const VERDICTS = ["ALLOW", "BLOCK", "ESCALATE"] as const;
-const SEVERITIES = ["LOW", "MEDIUM", "HIGH"] as const;
+const SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
 const CHECK_STATUSES = ["PASSED", "FAILED"] as const;
+const NETWORK_STATUSES = ["PASSED", "BLOCKED", "NOT_EVALUATED"] as const;
+const RISK_SEVERITIES = ["CRITICAL", "HIGH", "ELEVATED"] as const;
+const MITIGATIONS = ["QUARANTINE_AND_HARD_DENY", "STRIP_AND_RETRY_SANDBOX", "ISOLATE_SESSION"] as const;
+const isStrList = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
+
+/** Optional list field: absent → [], present but malformed → null (reject the whole verdict). */
+function optList<T>(v: unknown, parse: (item: unknown) => T | null): T[] | null {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) return null;
+  const out = v.map(parse);
+  return out.every((x): x is T => x !== null) ? out : null;
+}
+
+function parseNetwork(v: unknown): SatgNetworkInspection | null {
+  if (!isObj(v) || !isStr(v.parameter) || !isStr(v.requested_url) || !isOptStr(v.requested_host) || !isOptStr(v.registrable_domain) || !isOptStr(v.pinned_ip)) return null;
+  if (!isStrList(v.resolved_ips) || !Array.isArray(v.checks)) return null;
+  const checks = v.checks.map((c) => (isObj(c) && isStr(c.check) && oneOf(c.status, NETWORK_STATUSES) && isOptStr(c.detail) ? { check: c.check, status: c.status, detail: optStr(c.detail) } : null));
+  if (!checks.every((c) => c !== null)) return null;
+  return {
+    parameter: v.parameter,
+    requested_url: v.requested_url,
+    requested_host: optStr(v.requested_host),
+    registrable_domain: optStr(v.registrable_domain),
+    resolved_ips: [...v.resolved_ips],
+    pinned_ip: optStr(v.pinned_ip),
+    checks: checks as SatgNetworkCheck[],
+  };
+}
+
+function parseAnomaly(v: unknown): SatgAnomaly | null {
+  if (!isObj(v)) return null;
+  const strings = ["anomaly_id", "anomaly_type", "rule_id", "location", "raw_payload_sha256", "quarantined_hex_snippet", "parser_error_detail"] as const;
+  if (!strings.every((k) => isStr(v[k])) || typeof v.raw_payload_bytes !== "number") return null;
+  if (!oneOf(v.risk_severity, RISK_SEVERITIES) || !oneOf(v.mitigation_action, MITIGATIONS)) return null;
+  return {
+    anomaly_id: v.anomaly_id as string,
+    anomaly_type: v.anomaly_type as string,
+    risk_severity: v.risk_severity,
+    rule_id: v.rule_id as string,
+    location: v.location as string,
+    raw_payload_sha256: v.raw_payload_sha256 as string,
+    raw_payload_bytes: v.raw_payload_bytes,
+    quarantined_hex_snippet: v.quarantined_hex_snippet as string,
+    parser_error_detail: v.parser_error_detail as string,
+    mitigation_action: v.mitigation_action,
+  };
+}
+
+/** absent/null → null; present but malformed → undefined (reject the whole verdict). */
+function parseIntegrity(v: unknown): SatgRequestIntegrity | null | undefined {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v) || v.algorithm !== "HMAC-SHA256" || !isStr(v.key_id) || !isStr(v.signature) || !isStrList(v.signed_fields)) return undefined;
+  return { algorithm: "HMAC-SHA256", key_id: v.key_id, signature: v.signature, signed_fields: [...v.signed_fields] };
+}
 
 /** Returns the verdict if `v` matches the backend Verdict model, else null. */
 export function parseVerdict(v: unknown): SatgVerdict | null {
@@ -82,6 +180,12 @@ export function parseVerdict(v: unknown): SatgVerdict | null {
   for (const k of ["agent_id", "tool", "tool_version", "tool_manifest_hash", "request_hash"] as const) if (!isOptStr(v[k])) return null;
   if (!Array.isArray(v.checks) || !v.checks.every((c) => isObj(c) && isStr(c.check) && oneOf(c.status, CHECK_STATUSES))) return null;
   if (!Array.isArray(v.checks_not_evaluated) || !v.checks_not_evaluated.every(isStr)) return null;
+  const network = optList(v.network, parseNetwork);
+  const anomalies = optList(v.anomalies, parseAnomaly);
+  const integrity = parseIntegrity(v.request_integrity);
+  if (network === null || anomalies === null || integrity === undefined) return null;
+  // An integrity tag is only ever issued with an ALLOW.
+  if (integrity && v.verdict !== "ALLOW") return null;
   return {
     verdict: v.verdict,
     severity: v.severity,
@@ -97,6 +201,9 @@ export function parseVerdict(v: unknown): SatgVerdict | null {
     tool_version: optStr(v.tool_version),
     tool_manifest_hash: optStr(v.tool_manifest_hash),
     request_hash: optStr(v.request_hash),
+    network,
+    request_integrity: integrity,
+    anomalies,
   };
 }
 

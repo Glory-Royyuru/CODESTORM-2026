@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.models.envelope import new_request_id
 from app.models.verdict import CheckResult, CheckStatus, Severity, Verdict, VerdictType
 
 # Bumped whenever a rule's meaning, a rule ID, or the check order changes, so
 # every recorded verdict can be tied to the policy that produced it.
-POLICY_VERSION = "deterministic-core-1.1.0"
+POLICY_VERSION = "deterministic-core-1.2.0"
 
 
 @dataclass
@@ -41,6 +41,9 @@ class DecisionContext:
     tool_manifest_hash: Optional[str] = None
     request_hash: Optional[str] = None
     planned_checks: Tuple[str, ...] = ()
+    # Reported facts, recorded on the verdict; they never decide anything.
+    network: Tuple[Dict[str, Any], ...] = ()
+    anomalies: Tuple[Dict[str, Any], ...] = ()
 
 
 def decide(
@@ -74,6 +77,8 @@ def decide(
         tool_version=context.tool_version,
         tool_manifest_hash=context.tool_manifest_hash,
         request_hash=context.request_hash,
+        network=list(context.network),
+        anomalies=list(context.anomalies),
     )
 
     failed = next((o for o in outcomes if not o.passed), None)

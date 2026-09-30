@@ -10,7 +10,7 @@
 
 export interface RequestPreset {
   id: string;
-  group: "Allowed" | "Registry" | "Parameters" | "Destination" | "Canonicalization" | "Ingress";
+  group: "Allowed" | "Registry" | "Parameters" | "Destination" | "Network" | "Quarantine" | "Canonicalization" | "Ingress";
   title: string;
   description: string;
   /** What the example is designed to trigger, e.g. "BLOCK · TOOL-001". */
@@ -26,6 +26,17 @@ function deeplyNested(levels: number): string {
   for (let i = 0; i < levels; i++) inner = `{"n${levels - i}": ${inner}}`;
   return `{\n  "agent_id": "support-bot-3",\n  "tool": "get_weather",\n  "parameters": {"city": ${inner}}\n}`;
 }
+
+/** 2^256: one past the largest 256-bit value. Written as a raw literal — JSON.stringify cannot emit it. */
+const TWO_POW_256 = "115792089237316195423570985008687907853269984665640564039457584007913129639936";
+/** RFC 8032 test-1 signature with S replaced by S + ℓ: verifies on lax libraries, but is malleable. */
+const MALLEABLE_ED25519_SIG =
+  "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901554c8c7872aa064e049dbb3013fbf29380d25bf5f0595bbe24655141438e7a101b";
+/** DPoP proof whose header says alg "none" (signature stripping). */
+const ALG_NONE_DPOP =
+  "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6Im5vbmUiLCJqd2siOnsia3R5IjoiT0tQIiwiY3J2IjoiRWQyNTUxOSIsIngiOiIxMXFZQVlLeENyZlZTXzdUeVdRSE9nN2hjdlBhcGlNbHJ3SWFhUGNIVVJvIn19" +
+  ".eyJqdGkiOiJrSzl2WTJ4MV9xIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vc2F0Zy5sb2NhbC92MS90b29sY2FsbHMiLCJpYXQiOjE3OTAwMDAwMDB9" +
+  ".5VZDAMNgrHKQhuLMgG6CioSHfx645dl02HPgZSJJAVVfuIIVkKM7rMYeOXAc-bRr0lv18FlbviRlUUFDjnoQCw";
 
 export const PRESETS: RequestPreset[] = [
   {
@@ -115,6 +126,51 @@ export const PRESETS: RequestPreset[] = [
     description: "Two @ signs: a mail library might deliver to evil.example even though company.com appears last.",
     expected: "BLOCK · DEST-002",
     body: pretty({ agent_id: "support-bot-3", tool: "send_email", parameters: { to: "a@evil.example@company.com", subject: "Support", body: "Hello" } }),
+  },
+  {
+    id: "allow-fetch",
+    group: "Network",
+    title: "HTTPS fetch from an allow-listed domain",
+    description:
+      "research-bot fetches api.github.com. The backend resolves the name once, checks every resolved IP against the deny ranges, pins the IP and signs the approval with HMAC-SHA256. Needs outbound DNS; without it the backend fails closed (DEST-005).",
+    expected: "ALLOW · BASE-001",
+    body: pretty({ agent_id: "research-bot", tool: "fetch_url", parameters: { url: "https://api.github.com/zen" } }),
+  },
+  {
+    id: "ssrf-metadata",
+    group: "Network",
+    title: "Scenario: Cloud Metadata SSRF Egress (169.254.169.254)",
+    description:
+      "A prompt-injected research agent tries to read IAM credentials from the cloud metadata service. The IP literal is in the link-local / metadata range, so it is refused before any DNS lookup.",
+    expected: "BLOCK · DEST-004",
+    body: pretty({ agent_id: "research-bot", tool: "fetch_url", parameters: { url: "https://169.254.169.254/latest/meta-data/iam/security-credentials/" } }),
+  },
+  {
+    id: "ssrf-integer-ip",
+    group: "Network",
+    title: "Metadata IP disguised as an integer",
+    description: "2852039166 is 169.254.169.254 written as one decimal number. Libraries disagree on such forms, so the backend refuses them as ambiguous.",
+    expected: "BLOCK · DEST-002",
+    body: pretty({ agent_id: "research-bot", tool: "fetch_url", parameters: { url: "https://2852039166/latest/meta-data/" } }),
+  },
+  {
+    id: "crypto-tampering",
+    group: "Quarantine",
+    title: "Scenario: Corrupt Crypt-Arithmetic & DPoP Signature Tampering",
+    description:
+      "billing-bot settles an invoice with a 2^256 amount, a malleable Ed25519 signature (S ≥ ℓ) and an alg:none DPoP proof. The number is refused before it is ever converted, and all three anomalies are quarantined as fingerprints.",
+    expected: "BLOCK · CRYPTO-001 (HTTP 400)",
+    body: `{
+  "agent_id": "billing-bot",
+  "tool": "settle_invoice",
+  "parameters": {
+    "invoice_id": "INV-2044",
+    "amount_minor": ${TWO_POW_256},
+    "currency": "EUR",
+    "partner_signature": "${MALLEABLE_ED25519_SIG}",
+    "dpop_proof": "${ALG_NONE_DPOP}"
+  }
+}`,
   },
   {
     id: "invisible-char",

@@ -14,13 +14,16 @@ The gateway implements the deterministic front half of the SATG architecture: st
 
 ```
 POST /v1/toolcalls
-  → Ingress         strict JSON, size/depth limits, duplicate-key rejection, schema (INGRESS-*)
+  → Ingress         strict JSON, size/depth limits, duplicate-key rejection (INGRESS-*)
+  → Quarantine      crypt-arithmetic guard before schema validation (CRYPTO-*), then schema (INGRESS-005)
   → Canonicalize    NFKC normalization, control/invisible character rejection (CANON-*)
   → Registry        registered, manifest intact, enabled, agent authorized (TOOL-*)
   → Parameters      schema from the tool manifest (PARAM-*)
-  → Destination     egress declared in the manifest, strict address parsing, allowlist (DEST-*)
+  → Destination     egress declared in the manifest, strict address parsing, allowlist;
+                    URL egress: IPv4/IPv6 deny ranges, eTLD+1 allowlist, DNS resolve-once-and-pin (DEST-*)
   → Policy engine   single ALLOW/BLOCK decision (BASE-001 / POLICY-*)
-  → Audit           every decision recorded, including ingress rejections
+  → Integrity       ALLOW verdicts carry an HMAC-SHA256 tag over the approved request
+  → Audit           every decision recorded, including ingress rejections; anomalies to the anomaly ledger
 ```
 
 Checks stop at the first failure. An unauthorized caller learns nothing about a tool's schema or destinations, and later checks never run for a request that has already been vetoed. `checks_not_evaluated` lists the checks that were skipped.
@@ -50,11 +53,48 @@ Checks stop at the first failure. An unauthorized caller learns nothing about a 
 | DEST-001 | 200 | Destination domain not in the allowlist |
 | DEST-002 | 200 | Destination is not exactly one valid address (lists, multiple `@`, display names, ...) |
 | DEST-003 | 200 | Tool declares an egress channel the gateway cannot validate (fail closed) |
+| DEST-004 | 200 | SSRF: URL host is a local name, or an IP literal / DNS answer in a denied range |
+| DEST-005 | 200 | URL host could not be resolved (fail closed) |
+| DEST-006 | 200 | URL scheme is not `https` |
+| CRYPTO-001 | 400 | ARITHMETIC_INTEGER_OVERFLOW: numeric literal over 256 bits, or a float that overflows |
+| CRYPTO-002 | 400 | MALFORMED_BIGINT: integer outside the IEEE-754 safe range (send it as a decimal string) |
+| CRYPTO-003 | 400 | NON_CANONICAL_ENCODING: non-canonical hex/Base64, or homoglyphs in a crypto field name/value |
+| CRYPTO-004 | 400 | CORRUPT_CRYPTO_TOKEN: wrong length, invalid curve point, all-zero nonce, CRC-32 mismatch |
+| CRYPTO-005 | 400 | SIGNATURE_VERIFICATION_FAILURE: all-zero, degenerate, or malleable (S ≥ ℓ) signature |
+| CRYPTO-006 | 400 | DPOP_PROOF_TAMPERING: DPoP proof not a valid RFC 9449 structure (alg `none`/HS*, private JWK, ...) |
 | POLICY-001 | 200 | A check failed without its own rule ID |
 | POLICY-002 | 200 | No checks were evaluated (fail closed) |
 | POLICY-003 | 200 | A planned check was not evaluated (fail closed) |
 | GATEWAY-001 | 500 | Internal error; request blocked (fail closed) |
 | BASE-001 | 200 | All checks passed — ALLOW |
+
+## Network Boundary (URL egress)
+
+A tool whose manifest declares `egress.channel = "https"` (e.g. `fetch_url`) has each destination checked by [app/gateway/network.py](app/gateway/network.py), in order:
+
+1. strict URL parse: ASCII only, no userinfo, port 443 only, dotted-quad IPv4 only (integer/octal/hex forms such as `2852039166` are refused as ambiguous);
+2. `https` only;
+3. local names (`localhost`, `*.internal`, `*.local`, ...) are refused;
+4. IP literals are checked against the deny ranges: loopback `127.0.0.0/8`, `::1`; zero `0.0.0.0/8`, `::`; RFC 1918; link-local and cloud metadata `169.254.0.0/16`, `fe80::/10`; unique local `fc00::/7`; multicast/broadcast `224.0.0.0/4`, `ff00::/8`, `255.255.255.255`. IPv4-mapped IPv6 is checked as IPv4;
+5. the registrable domain (eTLD+1) must be on the allowlist; an unknown public suffix fails closed;
+6. the name is resolved **once**; every answer must pass the deny ranges, and the first answer is pinned.
+
+The verdict's `network` field reports every check (PASSED / BLOCKED / NOT_EVALUATED), the resolved IPs and the pinned IP. The execution layer must connect to `pinned_ip` (sending the hostname as SNI/Host) and never resolve the name again, otherwise DNS rebinding could swap in a private address.
+
+## Crypt-Arithmetic Quarantine
+
+[app/gateway/crypto_guard.py](app/gateway/crypto_guard.py) runs inside ingress, before the request becomes a typed ToolCall:
+
+- numeric literals are intercepted by the JSON parser's `parse_int`/`parse_float` hooks and are never converted if they are too large. This avoids truncation, and Python's 4300-digit conversion limit is never reached;
+- values of cryptographic fields in `parameters` (signature, nonce, DPoP, HMAC/MAC, CRC, public key, digest) must be canonically encoded and structurally possible. Field names that only *look* like these (homoglyphs) count as smuggling. `context` is not scanned, since it never drives a decision.
+
+The checks are structural. The gateway holds no signer keys, so it refuses values that no valid signature, point or proof could have. It does not verify signatures.
+
+Every anomaly goes to the append-only anomaly ledger ([app/audit/anomaly_ledger.py](app/audit/anomaly_ledger.py)) as a quarantine envelope: a SHA-256 fingerprint and at most 64 bytes of hex. The raw value is never stored or logged. The verdict carries the same envelopes in `anomalies`. The most severe anomaly (first on ties) sets the rule ID. `mitigation_action` is the recommended follow-up; the gateway itself always blocks.
+
+## Request Integrity
+
+Identity (who is calling) and request integrity (what was approved) are separate. Every ALLOW carries `request_integrity`, an HMAC-SHA256 tag over `request_id`, `agent_id`, `tool`, `request_hash`, `tool_manifest_hash`, `policy_version` and the pinned IPs ([app/gateway/request_integrity.py](app/gateway/request_integrity.py)). The execution layer recomputes it with `verify_request_integrity()` and must refuse the call if the tag is missing or differs. Set `SATG_GATEWAY_HMAC_SECRET` (≥ 32 bytes) to share the key with the execution layer. Without it, a random per-process key is used.
 
 ## Identity
 
@@ -93,10 +133,14 @@ backend/
 │   │   ├── registry.py             # Tool manifests, manifest hashing, permissions
 │   │   ├── parameter_validator.py  # Manifest-driven parameter validation
 │   │   ├── destination_validator.py  # Egress parsing and allowlists
+│   │   ├── network.py              # URL egress: deny ranges, eTLD+1 allowlist, DNS pinning
+│   │   ├── crypto_guard.py         # Crypt-arithmetic quarantine guard
+│   │   ├── request_integrity.py    # HMAC-SHA256 request-integrity tags
 │   │   ├── policy_engine.py        # Single deterministic decision point
 │   │   └── pipeline.py             # Runs the checks in order
 │   └── audit/
-│       └── logger.py               # Audit events (in memory + JSON log lines)
+│       ├── logger.py               # Audit events (in memory + JSON log lines)
+│       └── anomaly_ledger.py       # Append-only quarantine envelopes (in memory)
 ├── tests/
 ├── requirements.txt
 └── README.md
@@ -172,7 +216,7 @@ Content-Type: application/json
   ],
   "checks_not_evaluated": [],
   "request_id": "req_85263221661343d5b32800f17b0a937c",
-  "policy_version": "deterministic-core-1.1.0",
+  "policy_version": "deterministic-core-1.2.0",
   "tool_version": "1.0.0",
   "tool_manifest_hash": "sha256:03717e99...",
   "request_hash": "sha256:c079c942..."

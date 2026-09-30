@@ -4,7 +4,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import Request
 from pydantic import ValidationError
 
+from app.gateway.crypto_guard import Anomaly, NumericGuard, RiskSeverity, most_severe, scan_crypto_fields
 from app.models.tool_call import IDENTIFIER_RE, ToolCall
+from app.models.verdict import Severity
 
 MAX_BODY_BYTES = 64 * 1024
 # Depth of nested objects/arrays; the top-level object is depth 1 and
@@ -22,12 +24,18 @@ class IngressRejection(Exception):
         reason: str,
         data: Any = None,
         errors: Optional[List[Dict[str, Any]]] = None,
+        anomalies: Optional[List[Anomaly]] = None,
+        severity: Severity = Severity.MEDIUM,
+        stage: str = "ingress",
     ) -> None:
         super().__init__(reason)
         self.status_code = status_code
         self.rule_id = rule_id
         self.reason = reason
         self.errors = errors
+        self.anomalies = anomalies or []
+        self.severity = severity
+        self.stage = stage
         # Best-effort identifiers for the audit record, only when well-formed.
         self.claimed_agent_id = _claimed_identifier(data, "agent_id")
         self.claimed_tool = _claimed_identifier(data, "tool")
@@ -47,15 +55,17 @@ async def read_tool_call(request: Request) -> ToolCall:
     Rejects: non-JSON content types (INGRESS-006), bodies over
     MAX_BODY_BYTES (INGRESS-003), invalid UTF-8/JSON or NaN/Infinity
     (INGRESS-001), duplicate object keys at any depth (INGRESS-002),
-    nesting deeper than MAX_JSON_DEPTH (INGRESS-004), and anything that
-    does not match the ToolCall schema, including unknown fields
-    (INGRESS-005).
+    nesting deeper than MAX_JSON_DEPTH (INGRESS-004), crypt-arithmetic
+    anomalies (CRYPTO-*, see crypto_guard.py), and anything that does not
+    match the ToolCall schema, including unknown fields (INGRESS-005).
     """
     _check_content_type(request)
     body = await _read_body(request)
-    data = _parse_json(body)
+    numbers = NumericGuard()
+    data = _parse_json(body, numbers)
     if _exceeds_depth(data, MAX_JSON_DEPTH):
         raise IngressRejection(400, "INGRESS-004", f"Request body is nested deeper than {MAX_JSON_DEPTH} levels", data)
+    _quarantine(data, numbers)
     try:
         return ToolCall.model_validate(data)
     except ValidationError as error:
@@ -93,13 +103,45 @@ async def _read_body(request: Request) -> bytes:
     return bytes(body)
 
 
-def _parse_json(body: bytes) -> Any:
+_SEVERITY = {RiskSeverity.CRITICAL: Severity.CRITICAL, RiskSeverity.HIGH: Severity.HIGH, RiskSeverity.ELEVATED: Severity.MEDIUM}
+
+
+def _quarantine(data: Any, numbers: NumericGuard) -> None:
+    """Refuse the request if the crypt-arithmetic guard found anything.
+    Numeric literals are checked across the whole body (they were refused
+    during parsing); cryptographic fields only in `parameters`, since
+    `context` is never used for a security decision."""
+    anomalies = numbers.anomalies(data)
+    parameters = data.get("parameters") if isinstance(data, dict) else None
+    if isinstance(parameters, dict):
+        anomalies += scan_crypto_fields({"parameters": parameters})
+    if not anomalies:
+        return
+    worst = most_severe(anomalies)
+    raise IngressRejection(
+        400,
+        worst.rule_id,
+        f"Quarantined {worst.anomaly_type.value} at {worst.location}: {worst.detail}",
+        data,
+        anomalies=anomalies,
+        severity=_SEVERITY[worst.severity],
+        stage="quarantine",
+    )
+
+
+def _parse_json(body: bytes, numbers: NumericGuard) -> Any:
     try:
         text = body.decode("utf-8")
     except UnicodeDecodeError:
         raise IngressRejection(400, "INGRESS-001", "Request body is not valid UTF-8")
     try:
-        return json.loads(text, object_pairs_hook=_reject_duplicate_keys, parse_constant=_reject_constant)
+        return json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_constant,
+            parse_int=numbers.parse_int,
+            parse_float=numbers.parse_float,
+        )
     except _DuplicateKeyError:
         raise IngressRejection(400, "INGRESS-002", "Request body contains duplicate JSON keys")
     except _NonFiniteNumberError:

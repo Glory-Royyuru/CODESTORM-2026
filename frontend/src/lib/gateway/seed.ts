@@ -1,4 +1,5 @@
 import { Gateway } from "./engine";
+import { toWire } from "./ingress";
 import { runScript, scenarioScript, type Script } from "./runner";
 import { SCENARIOS, SMUGGLED_PATH } from "./scenarios";
 import type { Principal } from "./types";
@@ -6,6 +7,19 @@ import type { Principal } from "./types";
 const PRIYA: Principal = { agentId: "agent:finops-copilot@v2.4", userId: "u_priya", tenant: "acme" };
 const JORDAN: Principal = { agentId: "agent:devops-runner@v1.9", userId: "u_jordan", tenant: "acme" };
 const SAM: Principal = { agentId: "agent:sales-analyst@v1.2", userId: "u_sam", tenant: "acme" };
+
+/* Crypt-arithmetic tampering payloads. Numbers are spliced in as raw literals: JSON.stringify cannot write them. */
+const TWO_POW_256 = "115792089237316195423570985008687907853269984665640564039457584007913129639936";
+// RFC 8032 test-1 signature with S + ℓ (malleable), and a DPoP proof whose header says alg "none".
+const MALLEABLE_SIG =
+  "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901554c8c7872aa064e049dbb3013fbf29380d25bf5f0595bbe24655141438e7a101b";
+const ALG_NONE_DPOP =
+  "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6Im5vbmUiLCJqd2siOnsia3R5IjoiT0tQIiwiY3J2IjoiRWQyNTUxOSIsIngiOiIxMXFZQVlLeENyZlZTXzdUeVdRSE9nN2hjdlBhcGlNbHJ3SWFhUGNIVVJvIn19" +
+  ".eyJqdGkiOiJrSzl2WTJ4MV9xIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vc2F0Zy5sb2NhbC92MS90b29sY2FsbHMiLCJpYXQiOjE3OTAwMDAwMDB9" +
+  ".5VZDAMNgrHKQhuLMgG6CioSHfx645dl02HPgZSJJAVVfuIIVkKM7rMYeOXAc-bRr0lv18FlbviRlUUFDjnoQCw";
+const WIRE = { from_account: "ACCT-TREASURY-01", to_iban: "DE89370400440532013000", currency: "EUR" };
+const wireRaw = (args: Record<string, unknown>, amountLiteral: string) =>
+  toWire("MCP", "transfer_funds", { ...WIRE, amount: "__AMOUNT__", ...args }).replace('"__AMOUNT__"', amountLiteral);
 
 const LEADS = ["olivia.park@contoso.com", "james.lee@fabrikam.com", "emma.rossi@tailspin.io", "lucas.meyer@wingtip.dev"];
 
@@ -169,6 +183,46 @@ const BACKGROUND: Script[] = [
       { tool: "file_system", args: { path: SMUGGLED_PATH }, groundTruth: "attack", note: "" },
     ],
   },
+  {
+    principal: { ...JORDAN, agentId: "agent:research-assistant@v3.3" },
+    goal: "Collect the charts from the Q3 partner report",
+    scopes: ["net:fetch"],
+    protocol: "MCP",
+    title: "DNS rebinding & proxy bypass",
+    steps: [
+      { tool: "fetch_webpage", args: { url: "https://docs.partner-portal.com/reports/q3-2026" }, groundTruth: "benign", note: "" },
+      // TTL-0 name: the gateway pins the first (public) answer; the tool re-resolves and gets 169.254.169.254.
+      { tool: "fetch_webpage", args: { url: "https://assets.partner-portal.com/q3/revenue-chart.png" }, socket: "rebind", groundTruth: "attack", note: "" },
+      // Compromised tool image opens a raw socket to the metadata service, bypassing the proxy.
+      { tool: "fetch_webpage", args: { url: "https://github.com/acme/app/releases" }, socket: "direct", groundTruth: "attack", note: "" },
+    ],
+  },
+  {
+    principal: PRIYA,
+    goal: "Settle the Contoso partner invoice with their signed payment instruction",
+    scopes: ["payments:transfer"],
+    protocol: "MCP",
+    title: "Crypt-arithmetic tampering",
+    steps: [
+      { tool: "transfer_funds", args: {}, raw: wireRaw({}, TWO_POW_256), groundTruth: "attack", note: "" },
+      {
+        tool: "transfer_funds",
+        args: {},
+        raw: wireRaw({ nonce: "AAAAAAAAAAAAAAAAAAAAAA==", hmac: "c2lnbmVk=" }, "9007199254740993"),
+        groundTruth: "attack",
+        note: "",
+      },
+      {
+        tool: "transfer_funds",
+        args: {},
+        raw: wireRaw({ "ѕignature": MALLEABLE_SIG, partner_signature: MALLEABLE_SIG, dpop_proof: ALG_NONE_DPOP }, "48000"),
+        groundTruth: "attack",
+        note: "",
+      },
+      // The DPoP forgery isolated the session: even a clean call is now refused.
+      { tool: "transfer_funds", args: { ...WIRE, amount: 48000 }, groundTruth: "attack", note: "" },
+    ],
+  },
 ];
 
 export function seedGateway(): Gateway {
@@ -193,6 +247,8 @@ export function seedGateway(): Gateway {
     BACKGROUND[10],
     BACKGROUND[11],
     BACKGROUND[12],
+    BACKGROUND[13],
+    BACKGROUND[14],
   ];
   const span = 6 * 3600_000 - 10 * 60_000;
   scripts.forEach((s, i) => runScript(gw, s, { now: start + (span / scripts.length) * i, gapMs: 2600 + i * 90 }));

@@ -10,13 +10,13 @@ Pure TypeScript, no React. It runs in the browser (and in Node for the `scripts/
 
 | # | Stage | What happens | File |
 | --- | --- | --- | --- |
-| 0 | **Ingress** (M1) | Kill switch check → rate limit (20 burst, 2/s per agent) → strict JSON parse (duplicate keys rejected, depth ≤ 16, ≤ 256 KB) → protocol adapter turns MCP / OpenAI / REST into one `ToolCallEnvelope` | `ingress.ts` |
+| 0 | **Ingress** (M1) | Kill switch check → rate limit (20 burst, 2/s per agent) → crypt-arithmetic quarantine scan of the *raw text* (see below) → strict JSON parse (duplicate keys rejected, depth ≤ 16, ≤ 256 KB) → protocol adapter turns MCP / OpenAI / REST into one `ToolCallEnvelope` | `ingress.ts` |
 | 1 | **Canonicalize** | Every string argument is decoded through up to 4 layers (URL, hex, Base64, `\u` escapes, HTML entities) and Unicode-normalized | `decoder.ts` |
 | 2 | **Registry** (M2) | Tool must be registered. If the server advertises a manifest whose SHA-256 differs from the pinned one → tool is quarantined | `registry.ts` |
 | 3 | **Policy** (M3/M4/M5) | The 12 rules in the YAML bundle run; each can return a verdict + reason + counterfactual | `policy.ts`, `taint.ts` |
 | 4 | **ML scoring** (M6) | 5 scores → one calibrated risk → an ML verdict (or "abstain" when unsure) | `ml.ts` |
 | 5 | **Fusion** (M7) | `final = max(rule verdict, ML verdict)` — ML can raise, never lower | `engine.ts` |
-| 6 | **Sandbox** (M8) | Only if final ≤ `MONITOR`: simulated gVisor container, Vault lease, pinned-IP egress proxy; returns output | `sandbox.ts` |
+| 6 | **Sandbox** (M8) | Only if final ≤ `MONITOR`: destination firewall (resolve once, pin), HMAC request-integrity tag verified by the tool, simulated gVisor container, Vault lease, eBPF-enforced egress via the pinned-IP proxy; returns output | `sandbox.ts`, `network/` |
 | 7 | **DLP** (M9) | Output scanned: secrets/PII redacted, honeytoken leaks, "instructions aimed at the agent" fenced as untrusted | `dlp.ts` |
 | 8 | **Receipt** (M10) | Canonical JSON body → SHA-256 → Ed25519 signature, chained to the previous receipt | `receipts.ts`, `crypto.ts` |
 
@@ -42,6 +42,13 @@ Afterwards the engine updates the **session**: adds graph nodes/edges for the Pr
 | `scenarios.ts` | The 5 Attack Studio scenarios (A–E) and the object-ownership table (`ORD-456` → `u_maya`, `ORD-999` → `u_derek`, …). |
 | `runner.ts` | `runScript` (run a multi-step session through a gateway) and `timeMachine` (replay recorded history under two policy bundles and diff the verdicts). |
 | `seed.ts` | Builds the gateway shown on page load: runs the 5 scenarios plus background sessions (SSRF, secret leak to Slack, slow-drip, SQL injection, honeytoken, Tier-4 operations, a poisoned tool…) spread over the last 6 hours. |
+| `network/cidr.ts` | Strict IPv4/IPv6 parsing and the deny ranges (loopback, zero, RFC 1918, link-local/metadata, ULA, multicast/broadcast). |
+| `network/resolver.ts` | Deterministic simulated DNS, including a TTL-0 rebinding name (`assets.partner-portal.com`). |
+| `network/firewall.ts` | `inspectDestination`: parse → https → local names → deny ranges → eTLD+1 allowlist → resolve once and pin. `hostIsDenied` backs the policy's SSRF check. |
+| `network/ebpf.ts` | Simulated Cilium/eBPF connect hooks: only the egress proxy to the pinned IP is allowed; per-session byte budget with EWMA slow-drip. |
+| `network/identity.ts` | Simulated workload identity (mTLS 1.3, SPIFFE SVID, DPoP key bound to the task token) and **real** HMAC-SHA256 request-integrity tags. |
+| `anomaly/guard.ts` | `quarantineScan`: a lexer over the raw payload. Numeric literals are judged as written, never passed through `JSON.parse`; crypto fields must be canonical and structurally valid. |
+| `anomaly/ledger.ts` | `AnomalyLedger`: append-only, frozen `CryptArithmeticAnomalyRecord`s with their own pub/sub; `quarantineEnvelope` keeps only a SHA-256 fingerprint and ≤ 64 bytes of hex. |
 | `benchmarks.ts` | Generates the synthetic benchmark cases, runs one case (`runCase`) and computes detection rate / false-positive rate / p95 latency (`summarize`). |
 
 ## The policy rules (`policy.ts`)
@@ -62,6 +69,12 @@ Afterwards the engine updates the **session**: adds graph nodes/edges for the Pr
 | `tier4_approval` | Tier-4 tool without a valid two-person grant → HUMAN_APPROVAL |
 
 Each rule can be disabled or put in `monitor` (shadow) mode from the Policies screen. A few extra checks live directly in `engine.ts`: `kill_switch`, `rate_limit`, `ingress.*` parse errors, `registry.unknown_tool`, `session_quarantine`, `capability_grant` (consumed grant) and the DLP findings.
+
+## Network boundary and quarantine
+
+- **Quarantine.** A payload with any crypt-arithmetic anomaly is hard-denied at ingress: one `BLOCK` finding per anomaly. The counterfactual cites its `anomaly_fingerprint`, and the receipt's `anomalyFingerprints` lists the fingerprints, never the values. Each anomaly is appended to `gw.anomalies` with the receipt id (Audit → Anomaly Inspector). A `DPOP_PROOF_TAMPERING` anomaly isolates the session, so later calls are quarantined.
+- **Egress.** For an executing call, the gateway resolves the URL once, signs `{decision, session, tool, argsDigest, manifestHash, pinnedIp}` with HMAC-SHA256, and the sandbox verifies that tag before running. Every socket goes through `enforceConnect`. A firewall HARD_DENY, a dropped socket (proxy bypass, rebinding, budget) or a bad tag becomes a `BLOCK` finding (`egress.destination_firewall`, `ebpf.egress_enforcement`, `request_integrity`).
+- `npm run check:network` asserts the deny ranges, pinning, eBPF decisions, HMAC and the guard.
 
 ## The ML layer (`ml.ts`)
 

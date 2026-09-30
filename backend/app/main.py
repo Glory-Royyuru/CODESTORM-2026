@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.audit.anomaly_ledger import append_anomaly, quarantine_record
 from app.audit.logger import record_audit_event
 from app.gateway.identity import resolve_principal
 from app.gateway.ingress import IngressRejection, read_tool_call
@@ -15,6 +16,9 @@ from app.models.verdict import Severity, Verdict
 app = FastAPI(title="PNC3 Secure Agent Tool Gateway")
 
 _log = logging.getLogger("satg.gateway")
+
+# Anomaly-ledger fields the verdict already carries elsewhere.
+_LEDGER_ONLY_FIELDS = {"timestamp", "request_id", "agent_id", "tool"}
 
 # The body is parsed by the strict ingress reader, not by FastAPI, so the
 # request schema is declared here for the OpenAPI docs.
@@ -48,12 +52,20 @@ async def _handle_tool_call(request: Request):
     try:
         tool_call = await read_tool_call(request)
     except IngressRejection as rejection:
+        quarantined = [
+            quarantine_record(a, request_id, rejection.claimed_agent_id, rejection.claimed_tool) for a in rejection.anomalies
+        ]
         verdict = decide(
             rejection.claimed_agent_id,
             rejection.claimed_tool,
-            [CheckOutcome(CHECK_REQUEST_STRUCTURE, False, rejection.rule_id, rejection.reason, Severity.MEDIUM, "ingress")],
-            DecisionContext(request_id=request_id),
+            [CheckOutcome(CHECK_REQUEST_STRUCTURE, False, rejection.rule_id, rejection.reason, rejection.severity, rejection.stage)],
+            DecisionContext(
+                request_id=request_id,
+                anomalies=tuple({k: v for k, v in r.items() if k not in _LEDGER_ONLY_FIELDS} for r in quarantined),
+            ),
         )
+        for record in quarantined:
+            append_anomaly(record)
         record_audit_event(verdict)
         content = verdict.model_dump(mode="json")
         if rejection.errors:

@@ -10,6 +10,7 @@ import { TAINT_ORDER } from "@/lib/gateway/taint";
 import type { GraphNode, SessionState } from "@/lib/gateway/types";
 import { maxVerdict } from "@/lib/gateway/util";
 import { useGateway } from "@/lib/store";
+import SessionNetworkPanel from "./SessionNetworkPanel";
 
 const COL_W = 240;
 const NODE_W = 188;
@@ -148,6 +149,8 @@ export default function ProvenanceView() {
 
         <div className="min-w-0 space-y-5">
           <TrifectaPanel s={s} />
+
+          <SessionNetworkPanel s={s} />
 
           <Panel className="p-5">
             <SectionTitle

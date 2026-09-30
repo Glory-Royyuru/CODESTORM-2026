@@ -9,6 +9,7 @@ import { useSatgLog } from "@/lib/satg/log";
 import type { RequestPreset } from "@/lib/satg/presets";
 import { useUi } from "@/lib/store";
 import AttackStudio, { type StudioRun } from "./AttackStudio";
+import EgressInspector from "./EgressInspector";
 import LiveTelemetry from "./LiveTelemetry";
 import PipelineRun from "./PipelineRun";
 
@@ -125,6 +126,10 @@ export default function GatewayView() {
 
       <section id="pipeline" className="scroll-mt-28">
         <PipelineRun key={run?.runId ?? 0} run={run} onDone={onDone} />
+      </section>
+
+      <section>
+        <EgressInspector run={run} />
       </section>
 
       <section>

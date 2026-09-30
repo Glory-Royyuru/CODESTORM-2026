@@ -1,12 +1,21 @@
-import { isPrivateHost } from "./policy";
+import { EGRESS_PROXY, enforceConnect, type EbpfSessionState, type SocketEvent } from "./network/ebpf";
+import type { NetworkInspection } from "./network/firewall";
+import type { CanonicalRequest, RequestIntegrityTag } from "./network/identity";
+import type { SimulatedDns } from "./network/resolver";
 import type { RegisteredTool, SandboxResult, ToolCallEnvelope } from "./types";
-import { hashSeed, mulberry32, shortId, stringLeaves } from "./util";
+import { hashSeed, mulberry32, shortId } from "./util";
 
 /* M8 — Sandboxed execution harness (simulated container runtime) */
 
-function pinnedIp(host: string) {
-  const r = mulberry32(hashSeed(host));
-  return `${Math.floor(r() * 150) + 23}.${Math.floor(r() * 250)}.${Math.floor(r() * 250)}.${Math.floor(r() * 250) + 1}`;
+export interface SandboxContext {
+  /** Gateway-side destination check for the call's URL; the proxy only ever connects to its pinned IP. */
+  network?: NetworkInspection;
+  integrity: { request: CanonicalRequest; tag?: RequestIntegrityTag; verify: (req: CanonicalRequest, tag?: RequestIntegrityTag) => boolean };
+  ebpf: EbpfSessionState;
+  dns: SimulatedDns;
+  /** Scripted misbehaviour: the tool opens its own socket. */
+  socket?: "direct" | "rebind";
+  now: number;
 }
 
 /** Default outputs per tool when a scenario doesn't script one. */
@@ -40,18 +49,36 @@ function defaultOutput(env: ToolCallEnvelope): string {
   }
 }
 
-export function executeInSandbox(env: ToolCallEnvelope, tool: RegisteredTool, scriptedOutput?: string): SandboxResult {
+export function executeInSandbox(env: ToolCallEnvelope, tool: RegisteredTool, scriptedOutput: string | undefined, ctx: SandboxContext): SandboxResult {
   const r = mulberry32(hashSeed(env.id));
-  const urlLeaf = stringLeaves(env.arguments).find((l) => /^https?:\/\//.test(l.value));
-  let egressProxy: SandboxResult["egressProxy"];
-  if (urlLeaf) {
-    const host = new URL(urlLeaf.value).hostname;
-    // The proxy resolves once and pins the IP, so DNS rebinding can't swap in a private address.
-    const blocked = isPrivateHost(host);
-    egressProxy = { host, pinnedIp: blocked ? "0.0.0.0 (refused)" : pinnedIp(host), blocked };
+  const net = ctx.network;
+  const sockets: SocketEvent[] = [];
+  let refusal: string | undefined;
+
+  // Application request integrity: the tool side recomputes the HMAC and fails closed.
+  const integrityVerified = ctx.integrity.verify(ctx.integrity.request, ctx.integrity.tag);
+  if (!integrityVerified) refusal = "request-integrity HMAC missing or invalid — tool refused (fail closed)";
+  else if (net?.decision === "HARD_DENY") refusal = `egress firewall: ${net.reason}`;
+
+  const networked = tool.egress || tool.capability === "net:fetch";
+  if (!refusal && networked) {
+    const bytes = new TextEncoder().encode(JSON.stringify(env.arguments)).length;
+    // URL tools go to the pinned IP; other egress tools to their registered endpoint.
+    const upstream = net?.pinnedIp ?? `registered:${tool.manifest.server.id}`;
+    sockets.push(enforceConnect(ctx.ebpf, { tool: env.tool, dst: EGRESS_PROXY.ip, port: EGRESS_PROXY.port, upstream, pinnedIp: upstream, bytes }, ctx.now));
+    if (ctx.socket === "direct") {
+      sockets.push(enforceConnect(ctx.ebpf, { tool: env.tool, dst: "169.254.169.254", port: 80, bytes: 180, pinnedIp: upstream }, ctx.now));
+    } else if (ctx.socket === "rebind" && net?.host) {
+      // A naive HTTP client re-resolves the name at connect time and dials the answer directly.
+      const again = ctx.dns.resolve(net.host).ips[0];
+      sockets.push(enforceConnect(ctx.ebpf, { tool: env.tool, dst: again, port: 443, bytes, pinnedIp: upstream }, ctx.now));
+    }
+    const dropped = sockets.find((s) => s.action === "DROP");
+    if (dropped) refusal = `eBPF egress enforcement: ${dropped.reason} — runner terminated the tool`;
   }
+
   return {
-    executed: !egressProxy?.blocked,
+    executed: !refusal,
     runtime: "rootless docker + gVisor",
     container: {
       image: `satg/tool-${tool.manifest.name.replace(/_/g, "-")}@sha256:${tool.pinnedHash.slice(0, 16)}`,
@@ -61,13 +88,15 @@ export function executeInSandbox(env: ToolCallEnvelope, tool: RegisteredTool, sc
       readOnlyRootFs: true,
       cpu: tool.tier >= 3 ? "0.5 vCPU" : "0.25 vCPU",
       memory: tool.tier >= 3 ? "256Mi" : "128Mi",
-      network: tool.egress || tool.capability === "net:fetch" ? "egress via pinned-IP proxy" : "none",
+      network: networked ? `egress only via proxy ${EGRESS_PROXY.ip}:${EGRESS_PROXY.port} (eBPF-enforced)` : "none",
     },
-    vaultLease: tool.needsSecret
-      ? { path: tool.needsSecret, leaseId: `${tool.needsSecret}/${shortId("lease")}`, ttlSeconds: 60 }
-      : undefined,
-    egressProxy,
-    output: egressProxy?.blocked ? "" : scriptedOutput ?? defaultOutput(env),
+    vaultLease: tool.needsSecret && !refusal ? { path: tool.needsSecret, leaseId: `${tool.needsSecret}/${shortId("lease")}`, ttlSeconds: 60 } : undefined,
+    egressProxy: net?.host ? { host: net.host, pinnedIp: net.pinnedIp ?? "0.0.0.0 (refused)", blocked: net.decision === "HARD_DENY" } : undefined,
+    network: net,
+    sockets,
+    integrityVerified,
+    refusal,
+    output: refusal ? "" : (scriptedOutput ?? defaultOutput(env)),
     execMs: Math.round((12 + r() * 60) * 10) / 10,
   };
 }

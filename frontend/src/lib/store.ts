@@ -21,6 +21,13 @@ export function useGateway(): Gateway {
   return gw;
 }
 
+/** Subscribe to the append-only anomaly ledger (its own pub/sub, independent of engine emits). */
+export function useAnomalyLedger() {
+  const ledger = getGateway().anomalies;
+  useSyncExternalStore(ledger.subscribe, ledger.getVersion, ledger.getVersion);
+  return ledger.records();
+}
+
 const noopSubscribe = () => () => {};
 /** true only after hydration — the engine is seeded with live timestamps, so it never renders on the server. */
 export const useIsClient = () => useSyncExternalStore(noopSubscribe, () => true, () => false);
