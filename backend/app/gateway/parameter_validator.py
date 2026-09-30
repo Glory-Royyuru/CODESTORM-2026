@@ -1,39 +1,50 @@
 from typing import Any, Dict, Optional, Tuple
 
-# Each tool's required parameters and their expected Python type.
-# Any parameter not listed here is considered unexpected.
-TOOL_PARAMETER_SCHEMAS: Dict[str, Dict[str, type]] = {
-    "send_email": {"to": str, "subject": str, "body": str},
-    "search_customer": {"customer_id": str},
-    "get_weather": {"city": str},
-    "delete_database": {"database_name": str},
-}
+from app.gateway.registry import RegisteredTool
 
-TYPE_NAMES = {str: "string", int: "integer", float: "number", bool: "boolean"}
+LINE_BREAKS = ("\r", "\n", " ", " ")
 
 
-def validate_parameters(tool_name: str, parameters: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """Check parameters against the tool's schema.
+def _matches_type(value: Any, type_name: str) -> bool:
+    if type_name == "string":
+        return isinstance(value, str)
+    if type_name == "boolean":
+        return isinstance(value, bool)
+    # bool is a subclass of int in Python; JSON true/false is not a number.
+    if isinstance(value, bool):
+        return False
+    if type_name == "integer":
+        return isinstance(value, int)
+    if type_name == "number":
+        return isinstance(value, (int, float))
+    return False
+
+
+def validate_parameters(tool: RegisteredTool, parameters: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """Check canonical parameters against the tool manifest's schema.
 
     Returns None if valid, or a (rule_id, reason) tuple for the first
-    violation found.
+    violation found. Parameters not declared in the manifest are rejected.
     """
-    schema = TOOL_PARAMETER_SCHEMAS.get(tool_name, {})
-
-    for name, expected_type in schema.items():
+    for name, spec in tool.parameters.items():
         if name not in parameters:
-            return "PARAM-001", f"Required parameter '{name}' is missing"
+            if spec.required:
+                return "PARAM-001", f"Required parameter '{name}' is missing"
+            continue
 
         value = parameters[name]
-        if not isinstance(value, expected_type):
-            type_name = TYPE_NAMES.get(expected_type, expected_type.__name__)
-            return "PARAM-002", f"Parameter '{name}' must be a {type_name}"
+        if not _matches_type(value, spec.type):
+            return "PARAM-002", f"Parameter '{name}' must be a {spec.type}"
 
-        if expected_type is str and value.strip() == "":
-            return "PARAM-004", f"Required parameter '{name}' cannot be empty"
+        if spec.type == "string":
+            if value.strip() == "":
+                prefix = "Required parameter" if spec.required else "Parameter"
+                return "PARAM-004", f"{prefix} '{name}' cannot be empty"
+            if spec.single_line and any(brk in value for brk in LINE_BREAKS):
+                return "PARAM-005", f"Parameter '{name}' must not contain line breaks"
 
     for key in parameters:
-        if key not in schema:
+        if key not in tool.parameters:
             return "PARAM-003", f"Unexpected parameter '{key}'"
 
     return None

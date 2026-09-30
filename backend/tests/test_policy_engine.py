@@ -1,4 +1,4 @@
-from app.gateway.policy_engine import CheckOutcome, decide
+from app.gateway.policy_engine import POLICY_VERSION, CheckOutcome, DecisionContext, decide
 from app.models.verdict import Severity, VerdictType
 
 
@@ -59,3 +59,78 @@ def test_multiple_failed_checks_deterministically_use_the_first():
 
     assert verdict.rule_id == "TOOL-002"
     assert verdict.reason == "Tool is disabled"
+
+
+# --- decision context, fail-closed invariants, explainability ---
+
+
+def test_failed_check_without_rule_uses_policy_fallback():
+    verdict = decide("a", "t", [CheckOutcome("CUSTOM", passed=False)])
+
+    assert verdict.verdict == VerdictType.BLOCK
+    assert verdict.rule_id == "POLICY-001"
+    assert verdict.severity == Severity.MEDIUM
+
+
+def test_no_checks_evaluated_fails_closed():
+    verdict = decide("a", "t", [])
+
+    assert verdict.verdict == VerdictType.BLOCK
+    assert verdict.rule_id == "POLICY-002"
+
+
+def test_unevaluated_planned_check_fails_closed():
+    context = DecisionContext(planned_checks=("REQUEST_STRUCTURE", "TOOL_REGISTRY"))
+    verdict = decide("a", "t", [CheckOutcome("REQUEST_STRUCTURE", passed=True)], context)
+
+    assert verdict.verdict == VerdictType.BLOCK
+    assert verdict.rule_id == "POLICY-003"
+    assert verdict.checks_not_evaluated == ["TOOL_REGISTRY"]
+
+
+def test_first_failure_wins_and_skipped_checks_are_listed():
+    context = DecisionContext(planned_checks=("A", "B", "C"))
+    verdict = decide("a", "t", [CheckOutcome("A", True), CheckOutcome("B", False, "X-1", "b failed", Severity.HIGH, "stage-b")], context)
+
+    assert verdict.rule_id == "X-1"
+    assert verdict.stage == "stage-b"
+    assert verdict.checks_not_evaluated == ["C"]
+
+
+def test_decision_context_is_carried_into_verdict():
+    context = DecisionContext(
+        request_id="req_test",
+        tool_version="1.0.0",
+        tool_manifest_hash="sha256:manifest",
+        request_hash="sha256:request",
+    )
+    verdict = decide("a", "t", [CheckOutcome("A", True)], context)
+
+    assert verdict.request_id == "req_test"
+    assert verdict.policy_version == POLICY_VERSION
+    assert verdict.tool_version == "1.0.0"
+    assert verdict.tool_manifest_hash == "sha256:manifest"
+    assert verdict.request_hash == "sha256:request"
+
+
+def test_request_id_is_generated_when_not_supplied():
+    first = decide("a", "t", [CheckOutcome("A", True)])
+    second = decide("a", "t", [CheckOutcome("A", True)])
+    assert first.request_id != second.request_id
+
+
+def test_deterministic_core_never_escalates():
+    cases = [
+        [],
+        [CheckOutcome("A", True)],
+        [CheckOutcome("A", False, "X-1", "r", Severity.LOW)],
+        [CheckOutcome("A", True), CheckOutcome("B", False)],
+    ]
+    for outcomes in cases:
+        assert decide("a", "t", outcomes).verdict in (VerdictType.ALLOW, VerdictType.BLOCK)
+
+
+def test_any_failed_check_blocks_regardless_of_position():
+    for position in range(4):
+        outcomes = [CheckOutcome(f"C{i}", i != position, "X-1" if i == position else None) for i in range(4)]
+        assert decide("a", "t", outcomes).verdict == VerdictType.BLOCK
