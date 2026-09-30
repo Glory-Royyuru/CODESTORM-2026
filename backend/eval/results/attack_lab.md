@@ -1,6 +1,6 @@
 # SATG attack lab results
 
-Generated 2026-09-30T21:49:02.663879+00:00 · sandbox: docker · 14/15 scenarios matched expectations.
+Generated 2026-09-30T22:10:33.059671+00:00 · sandbox: docker · 14/15 scenarios matched expectations.
 
 Synthetic scenarios run through the real gateway pipeline. ML risk comes from satg-ml-v0.1, trained on AgentDrift; these tools are out of its training distribution (see ml/README.md §14).
 
