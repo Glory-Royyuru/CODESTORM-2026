@@ -1,110 +1,132 @@
-# SATG — Secure Agent Tool Gateway console
+# SATG — Secure Agent Tool Gateway
 
-A Next.js app that demonstrates a zero-trust firewall sitting between AI agents and the tools they call.
-The visual style comes from the React Bits landing page (dark background, orange glow ribbon, cursor-reactive dot grid, glass panels).
+SATG sits between an AI agent and the tools it can call. Every tool call is sent to the gateway first, checked deterministically, and answered with an **ALLOW** or **BLOCK** verdict **before** any tool runs.
 
-The **Live Gateway** (`/`) is connected to the real SATG backend in [`backend/`](backend/README.md) — the FastAPI Phase 1–5 deterministic gateway. The backend is the only security authority: the console sends the request, shows the backend's verdict, and never decides anything itself. No tool is executed.
+**Why:** an agent that reads untrusted content (web pages, emails, documents) can be manipulated into calling tools with attacker-chosen arguments: emailing data to an outside domain, injecting email headers, calling tools it was never granted, or smuggling invisible Unicode past reviewers. SATG enforces what each agent may call and with which arguments, independently of what the model was told.
 
-All **other screens** (Provenance, Registry, Audit, Eval Lab, Policies, Approvals, the kill switch) still run on an in-browser TypeScript demo engine (`src/lib/gateway/`) and are labelled as simulations in the UI.
+## Architecture
 
-## Run it
+```
+Browser (console)
+   │  POST /api/satg/v1/toolcalls              same origin, raw body
+   ▼
+frontend/  Next.js route handler (proxy)       forwards bytes + status unchanged
+   │  POST /v1/toolcalls                        SATG_BACKEND_URL (default http://127.0.0.1:8000)
+   ▼
+backend/   FastAPI SATG gateway                 the only security authority
+   Ingress → Canonicalize → Registry → Parameters → Destination → Policy decision → Audit
+   ▼
+Verdict (ALLOW / BLOCK) — no tool is executed
+```
 
-Two terminals:
+The console never decides a verdict. If the backend is unreachable, the proxy returns `502`/`504` with no verdict and the UI shows a network error; an error can never become an ALLOW.
+
+## Repository layout
+
+| Path | What it is |
+| --- | --- |
+| [`backend/`](backend/README.md) | FastAPI deterministic gateway (Python). Checks, rule IDs and API contract are documented in its README. |
+| [`frontend/`](frontend/README.md) | Next.js console. The **Live Gateway** screen uses the real backend; the other screens are labelled simulations. |
+
+## Run locally
+
+Requirements: Python 3.11+ (tested on 3.13) and Node.js 20.9+ (tested on 24). Ports: backend `8000`, frontend `3000`.
+
+**Terminal 1 — backend**
 
 ```bash
-# 1 — SATG backend (http://127.0.0.1:8000)
 cd backend
-venv\Scripts\activate            # Windows (source venv/bin/activate on macOS/Linux)
-uvicorn app.main:app --reload
-
-# 2 — console (http://localhost:3000)
-npm install
-npm run dev
+python -m venv venv
+venv\Scripts\activate            # Windows; macOS/Linux: source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload    # http://127.0.0.1:8000  (API docs: /docs)
 ```
 
-The console reaches the backend through its own same-origin proxy, so no CORS setup is needed. To point it at a different backend, set `SATG_BACKEND_URL` (server-side, default `http://127.0.0.1:8000`) before `npm run dev` / `npm start`. If the backend is down, the Live Gateway shows a network error and no verdict.
-
-Other checks:
+**Terminal 2 — frontend**
 
 ```bash
-npm run build        # production build (typecheck + static pages)
-npm run lint
-npm run check:engine # demo engine: print every seeded decision + verify the receipt chain
-npm run check:bench  # demo engine: run the benchmark suites headlessly
-cd backend && python -m pytest -q
+cd frontend
+npm install
+npm run dev                      # http://localhost:3000
 ```
 
-## How the Live Gateway talks to the backend
+### Configuration
 
-```
-browser ──POST /api/satg/v1/toolcalls──▶ Next.js route handler ──POST /v1/toolcalls──▶ FastAPI SATG backend
-        ◀── backend status + body, unchanged ──                  ◀── Verdict (ALLOW / BLOCK) ──
-```
-
-- `src/app/api/satg/v1/toolcalls/route.ts` and `src/app/api/satg/health/route.ts` forward to the backend (`src/lib/satg/proxy.ts`). The raw request bytes and `Content-Type` are forwarded unchanged, so the backend's strict ingress judges exactly what the user typed. The backend's status code and body are relayed unchanged.
-- If the backend cannot be reached, the proxy answers `502`/`504` with an `x-satg-proxy-error` header and **no verdict**.
-- `src/lib/satg/client.ts` validates every response against the backend's `Verdict` model. Anything else (wrong shape, unknown verdict, an `ALLOW` on a non-200 status) is shown as a backend error, never as a verdict.
-- `src/lib/satg/presets.ts` holds example request bodies built from the backend's registered tools. They are inputs only; the result always comes from the backend.
-
-## The mental model of the demo engine (read this first)
-
-> This section describes the full 11-module design as implemented by the in-browser demo engine. The real backend currently implements the deterministic front half (ingress → canonicalize → registry → parameters → destination → policy decision → audit) and returns ALLOW/BLOCK only.
-
-1. An **agent** (e.g. `agent:research-assistant@v3.2`) works for a **user** (e.g. `u_maya`) inside a **session** that has a goal ("Summarize the Q3 partner report…") and a short-lived token listing what it may do (`db:read`, `email:send`, …).
-2. Every tool call the agent makes (a JSON payload in MCP, OpenAI-function or REST format) goes through the gateway **pipeline**:
-
-   ```
-   Ingress → Canonicalize → Registry → Policy → ML Scoring → Decision Fusion → Sandbox → DLP → Receipt
-   ```
-
-3. The pipeline produces a **verdict**, in increasing severity:
-   `ALLOW` → `MONITOR` → `STEP_UP` → `HUMAN_APPROVAL` → `QUARANTINE` → `BLOCK`.
-   Rules can block on their own; ML can only *raise* the verdict, never lower it.
-4. Every call — allowed or blocked — gets a **signed receipt** appended to a hash chain (the Audit Ledger).
-5. If the call executes, its output is split into labelled **data atoms** (e.g. an email address marked `UNTRUSTED` because it came from a web page). Later calls are checked for those atoms, which is how "copy data from a web page into an email" gets caught.
-
-When the app loads, it replays ~40 realistic calls (`src/lib/gateway/seed.ts`), so every screen already has data.
-
-## The screens
-
-| Nav item | Route | What you do there | Code |
+| Variable | Where | Default | Purpose |
 | --- | --- | --- | --- |
-| Live Gateway | `/` | **Real backend.** Pick an example request (or edit the raw body), press **Send Through Gateway**, see the backend's checks and verdict | `src/components/gateway/`, `src/lib/satg/` |
-| Provenance DAG | `/provenance` | Pick a session, see its graph of prompts → tool calls → data → external targets, click nodes | `src/components/provenance/` |
-| Tool Registry | `/registry` | See each tool's pinned hash and status; simulate a rug-pull; register a new tool | `src/components/registry/` |
-| Audit Ledger | `/audit` | Browse all receipts, verify the whole chain, open one and verify / tamper-test it | `src/components/audit/` |
-| Eval Lab | `/eval-lab` | Run the benchmark suites; fuzz a payload with stacked encodings | `src/components/eval/` |
-| Policies | `/policies` | Edit the YAML policy, replay history against it (Time Machine), publish it | `src/components/policies/` |
-| Approvals | `/approvals` | Approve/reject held calls; two approvals issue a single-use signed grant | `src/components/approvals/` |
-| Docs | `/docs` | Architecture summary and what is real vs simulated | `src/components/docs/` |
+| `SATG_BACKEND_URL` | frontend (server-side only) | `http://127.0.0.1:8000` | Where the Next.js proxy forwards requests. Set it in `frontend/.env.local` (see `frontend/.env.example`). |
 
-Always visible in the header: the backend health indicator (`GET /health`), the **Kill Switch** of the demo engine (simulation only — it does not affect the backend), the theme toggle and the GitHub counter.
+The backend reads no environment variables. No secrets or API keys are needed.
 
-## Folder map
+## Verify the live gateway
 
-```
-reactbits-hero/
-├── public/            static files (only create-next-app leftovers)
-├── scripts/           terminal checks for the engine and benchmarks
-└── src/
-    ├── app/           Next.js routes — each page.tsx just renders a View component
-    ├── components/    all UI, one folder per screen + shared shell/ui/hero
-    └── lib/
-        ├── store.ts   connects React to the demo engine; UI state (theme, toasts)
-        ├── satg/      real backend integration: proxy, client, request presets
-        └── gateway/   the in-browser demo engine — one file per security module
+In the browser, open http://localhost:3000. The header should show **Backend online**. Pick an example request and press **Send Through Gateway**:
+
+- **Email to an allow-listed domain** → `ALLOW · BASE-001`, with request ID, request hash and manifest hash.
+- **Recipient outside the allowlist** → `BLOCK · DEST-001`.
+- **Duplicate JSON key** → `BLOCK · INGRESS-002` (HTTP 400).
+- Stop the backend and send again → **NETWORK ERROR**, no verdict; the header shows **Backend offline**.
+
+From a terminal, through the same proxy:
+
+```bash
+curl -X POST http://localhost:3000/api/satg/v1/toolcalls -H "Content-Type: application/json" \
+  -d '{"agent_id":"support-bot-3","tool":"send_email","parameters":{"to":"user@company.com","subject":"Hi","body":"Hello"}}'
+# → "verdict": "ALLOW", "rule_id": "BASE-001"
 ```
 
-Every folder has its own README with more detail. Suggested reading order:
-`src/lib/gateway/README.md` → `src/lib/README.md` → `src/components/README.md` → the screen folders.
+Change `to` to `user@evil.example` to get `BLOCK` / `DEST-001`.
 
-## What is real and what is simulated
+## What is implemented
 
-- **Real security decisions:** only the SATG backend (`backend/`), used by the Live Gateway. See [backend/README.md](backend/README.md) for its checks and rule IDs.
-- **Demo engine (every other screen), real code but not authoritative:** JSON parsing and limits, protocol adapters, the multi-layer decoder, all policy rules, taint tracking, the ML models (small, but genuine — e.g. an isolation forest trained at startup), SHA-256 hashing, Ed25519 signatures, the hash chain, approval grants, policy replay.
-- **Simulated:** tool execution (scripted outputs), the sandbox container and Vault secrets, stage latencies (modelled production costs + measured browser time), and the benchmark suites (synthetic cases shaped like AgentDojo / InjecAgent / MCPTox / agent-egress-bench, not the real datasets).
-- State lives in memory and **resets on page reload**. A new Ed25519 signing key is generated each load.
+In the backend, and therefore authoritative:
 
-## Tech
+- **Strict ingress:** `application/json` only, 64 KiB limit, UTF-8, duplicate-key rejection, depth ≤ 8, no NaN/Infinity, strict schema (`INGRESS-*`).
+- **Canonicalization:** NFKC normalization, rejection of control/invisible characters and lone surrogates, a SHA-256 `request_hash` (`CANON-*`).
+- **Tool registry:** registration, a pinned manifest hash (tampering is refused), enabled state, per-agent permissions (`TOOL-*`).
+- **Parameter validation:** checked against each tool's manifest (`PARAM-*`).
+- **Destination validation:** strict email parsing and a domain allowlist (`DEST-*`).
+- **One deterministic policy decision point:** fail-closed (`BASE-001`, `POLICY-*`, `GATEWAY-001`).
+- **Audit:** an audit record for every decision, including rejections.
 
-Next.js 16 (App Router) · React 19 · Tailwind CSS v4 · Framer Motion · Lucide icons · Zustand · `@noble/curves` + `@noble/hashes` (crypto) · `yaml`.
+In the frontend:
+
+- The **Live Gateway** screen, which uses the real backend.
+- A backend health indicator.
+
+**Simulations (in-browser demo engine, not authoritative, labelled in the UI):**
+
+- Provenance DAG, Tool Registry, Audit Ledger, Eval Lab, Policies, Approvals, the Docs module overview, and the header kill switch.
+- They illustrate the planned modules: taint tracking, ML scoring, decision fusion, sandbox, DLP and Ed25519 receipts. None of these exist in the backend yet.
+
+## Current limitations
+
+- **No authentication:** `agent_id` is self-asserted (`auth_method: "self_asserted"` in the audit record).
+- **No tool execution:** the gateway returns verdicts only; there is no sandbox and no response DLP.
+- **Fixed registry:** four demo tools are defined in code (`backend/app/gateway/registry.py`), and only the `email` egress channel has a destination validator.
+- **Audit storage:** records are in memory and on stdout; there is no persistence and no read API, so the console shows only the responses it received itself.
+- **No rate limiting or kill switch in the backend.**
+- **`ESCALATE`:** reserved in the verdict model, but the backend never emits it yet.
+
+## ML integration
+
+The ML work lives on the `ml-model` branch as a top-level `ml/` directory and has not been merged yet.
+
+- **Where it plugs in:** the backend pipeline (`backend/app/gateway/pipeline.py` → `policy_engine.py`), after the deterministic checks.
+- **Authority:** deterministic checks stay authoritative. A deterministic BLOCK must stay a BLOCK.
+- **Escalation:** the verdict model already reserves `ESCALATE` for a "hold" outcome. The frontend client already accepts `ESCALATE` and treats it as not allowed.
+- **Frontend demo code:** `frontend/src/lib/gateway/ml.ts` belongs to the demo engine. It is not the integration point.
+
+## Development and testing
+
+```bash
+# backend (from backend/)
+python -m pytest -q              # 140 tests
+
+# frontend (from frontend/)
+npm run lint
+npx next typegen && npx tsc --noEmit   # typegen creates Next route types on a fresh clone
+npm run build
+npm run check:engine             # demo engine sanity check
+npm run check:bench              # demo engine benchmark suites
+```
