@@ -8,6 +8,7 @@ import { categorize, submitToolCall } from "@/lib/satg/client";
 import { useSatgLog } from "@/lib/satg/log";
 import type { RequestPreset } from "@/lib/satg/presets";
 import { useUi } from "@/lib/store";
+import AgentConsole from "./AgentConsole";
 import AttackStudio, { type StudioRun } from "./AttackStudio";
 import EgressInspector from "./EgressInspector";
 import RiskSandboxPanel from "./RiskSandboxPanel";
@@ -124,6 +125,10 @@ export default function GatewayView() {
         </motion.div>
 
         <AttackStudio busy={busy} onRun={onRun} />
+      </section>
+
+      <section id="agent" className="scroll-mt-28">
+        <AgentConsole />
       </section>
 
       <section id="pipeline" className="scroll-mt-28">

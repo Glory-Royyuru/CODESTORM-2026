@@ -1,0 +1,7 @@
+# demo/agent_demo.py (scripted mode, the default) needs only this:
+requests>=2.31
+
+# Optional, live LLM mode only (DEMO_MODE=live), install separately:
+#   pip install "openai>=1.0"
+# demo/tamper_demo.py needs nothing extra: run it with the backend's interpreter
+# (backend/.venv), since it uses the backend's own code in-process.
