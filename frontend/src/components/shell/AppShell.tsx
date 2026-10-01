@@ -26,12 +26,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [theme]);
 
   if (!isClient) {
-    // The engine seeds itself with live timestamps + a fresh Ed25519 key, so it only runs in the browser.
+    // The in-browser demo engine seeds itself with live timestamps + a fresh key, so the console renders client-side only.
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="flex items-center gap-3 font-mono text-[13px] text-subtle">
           <ShieldCheck className="h-4 w-4 animate-pulse text-accent" />
-          Booting gateway engine · generating Ed25519 signing key…
+          Loading console…
         </div>
       </div>
     );

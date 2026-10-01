@@ -57,7 +57,7 @@ export default function TopNav() {
                   )}
                   {item.label}
                   {item.href === "/approvals" && pending > 0 && (
-                    <span className="ml-1.5 rounded-full bg-violet-500/20 px-1.5 py-px font-mono text-[10.5px] text-violet-300">{pending}</span>
+                    <span title="Seeded by the in-browser demo engine, not the SATG backend" className="ml-1.5 rounded bg-fg/10 px-1 py-px font-mono text-[10px] text-subtle">{pending} SIM</span>
                   )}
                 </Link>
               </li>
@@ -121,7 +121,11 @@ export default function TopNav() {
                   className={cx("flex items-center justify-between rounded-xl px-4 py-3 text-[16px] font-semibold", isActive(item.href) ? "bg-surface-hover text-fg" : "text-fg/70")}
                 >
                   {item.label}
-                  {item.href === "/approvals" && pending > 0 && <span className="rounded-full bg-violet-500/20 px-2 font-mono text-[12px] text-violet-300">{pending}</span>}
+                  {item.href === "/approvals" && pending > 0 && (
+                    <span title="Seeded by the in-browser demo engine, not the SATG backend" className="rounded bg-fg/10 px-1.5 font-mono text-[11px] text-subtle">
+                      {pending} SIM
+                    </span>
+                  )}
                 </Link>
               ))}
               <button type="button" onClick={toggleTheme} className="mt-2 flex w-full items-center gap-2 rounded-xl px-4 py-3 text-[15px] font-semibold text-fg/70 sm:hidden">

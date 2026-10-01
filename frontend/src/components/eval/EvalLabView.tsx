@@ -34,7 +34,7 @@ function Gauge({ label, value, display, target, good }: { label: string; value: 
       </svg>
       <p className="-mt-9 font-mono text-[26px] font-semibold tracking-tight text-fg">{display}</p>
       <p className="mt-2 text-[13px] font-semibold text-fg">{label}</p>
-      <p className={cx("font-mono text-[11.5px]", good == null ? "text-subtle" : good ? "text-emerald-400" : "text-red-400")}>target {target}</p>
+      <p className={cx("font-mono text-[11.5px]", good == null ? "text-subtle" : good ? "text-emerald-400" : "text-red-400")}>demo-engine target {target}</p>
     </Panel>
   );
 }
@@ -115,7 +115,7 @@ function PayloadMutator() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="primary" className="h-9 text-[13px]" onClick={fire}>
-              <Zap className="h-4 w-4" /> Fire through gateway
+              <Zap className="h-4 w-4" /> Fire through demo engine
             </Button>
             <Button variant="ghost" className="h-9 text-[13px]" disabled={history.length < 2} onClick={() => { setHistory((h) => h.slice(0, -1)); setChain((c) => c.slice(0, -1)); setResult(null); }}>
               <Undo2 className="h-4 w-4" /> Undo
@@ -158,7 +158,7 @@ function PayloadMutator() {
               </ul>
             </div>
           ) : (
-            <p className="text-[13px] text-subtle">Stack encodings on the payload, then fire it. The canonicalizer decodes up to 4 layers and compares what a strict parser and a lenient downstream parser would each see.</p>
+            <p className="text-[13px] text-subtle">Stack encodings on the payload, then fire it through the in-browser demo engine (not the SATG backend). Its canonicalizer decodes up to 4 layers and compares what a strict parser and a lenient downstream parser would each see.</p>
           )}
         </div>
       </div>
@@ -190,7 +190,7 @@ export default function EvalLabView() {
       else {
         running.current = false;
         const s = summarize(out);
-        toast({ tone: s.detectionRate >= 0.984 && s.falsePositiveRate <= 0.008 ? "success" : "warn", title: "Benchmark suite complete", detail: `${out.length} cases · detection ${(s.detectionRate * 100).toFixed(1)}% · FPR ${(s.falsePositiveRate * 100).toFixed(2)}%` });
+        toast({ tone: s.detectionRate >= 0.984 && s.falsePositiveRate <= 0.008 ? "success" : "warn", title: "Demo benchmark suite complete", detail: `${out.length} cases · detection ${(s.detectionRate * 100).toFixed(1)}% · FPR ${(s.falsePositiveRate * 100).toFixed(2)}%` });
       }
     };
     setTimeout(tick, 30);
@@ -203,16 +203,16 @@ export default function EvalLabView() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="M11 — Attack mutation & benchmark lab"
+        eyebrow="M11 — Attack mutation & benchmark lab · demo engine"
         title={
           <>
             Continuous <span className="text-accent">evaluation</span>
           </>
         }
-        description="Synthetic suites modelled on AgentDojo, InjecAgent, MCPTox and agent-egress-bench run through a fresh ephemeral gateway using the live policy bundle — including a held-out paraphrased-exfiltration family the rules are not tuned for."
+        description="Synthetic suites modelled on AgentDojo, InjecAgent, MCPTox and agent-egress-bench run through a fresh, ephemeral in-browser demo engine using the demo policy bundle, including a held-out paraphrased-exfiltration family its rules are not tuned for. These are demo-engine results, not measurements of the SATG backend."
         actions={
           <Button variant="primary" onClick={run} disabled={!!progress && progress.done < progress.total}>
-            <Play className="h-4 w-4" /> Run Benchmark Suite
+            <Play className="h-4 w-4" /> Run demo benchmark
           </Button>
         }
       />
@@ -295,7 +295,7 @@ export default function EvalLabView() {
             <p className="text-[13px] text-emerald-400">None.</p>
           )}
           <p className="mt-3 text-[12px] text-subtle">
-            Missed cases are the held-out family: the agent paraphrases confidential data to an allow-listed internal address, so no tainted atom crosses verbatim. Closing it needs semantic DLP — this is where the ML layer earns its keep.
+            Missed cases are the held-out family: the agent paraphrases confidential data to an allow-listed internal address, so no tainted atom crosses verbatim. Closing it would need semantic DLP, which is not implemented (in the demo engine or the backend).
           </p>
         </Panel>
       )}

@@ -56,7 +56,7 @@ export default function PoliciesView() {
     const t0 = performance.now();
     const r = timeMachine(getGateway(), parsed.bundle);
     setReport(r);
-    toast({ tone: "info", title: "Time Machine replay complete", detail: `${r.calls} historical calls re-evaluated in ${Math.round(performance.now() - t0)}ms · ${r.diffs.length} decision(s) changed` });
+    toast({ tone: "info", title: "Demo time machine replay complete", detail: `${r.calls} historical calls re-evaluated in ${Math.round(performance.now() - t0)}ms · ${r.diffs.length} decision(s) changed` });
   };
 
   const publish = () => {
@@ -65,19 +65,19 @@ export default function PoliciesView() {
     const next = { ...parsed.bundle, version: `${y}.${m}.${Number(n) + 1}` };
     getGateway().setBundle(next);
     setDraft(bundleToYaml(next));
-    toast({ tone: "success", title: `Policy bundle ${next.version} published`, detail: "New receipts reference the updated rule versions" });
+    toast({ tone: "success", title: `Demo policy bundle ${next.version} published`, detail: "New demo-engine receipts reference the updated rule versions · the SATG backend is not affected" });
   };
 
   return (
     <div>
       <PageHeader
-        eyebrow="M3 · M11 — Policy manager & control plane"
+        eyebrow="M3 · M11 — Policy manager & control plane · demo engine"
         title={
           <>
             Policy-as-code with a <span className="text-accent">time machine</span>
           </>
         }
-        description="Edit the declarative YAML bundle, replay every recorded session against the candidate, and only publish when it stops more attacks without blocking legitimate work."
+        description="Edit the demo engine's declarative YAML bundle, replay every recorded demo session against the candidate, and only publish when it stops more attacks without blocking legitimate work. This runs in the browser; the FastAPI backend's policy is defined in its code and is not changed from here."
       />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
@@ -219,21 +219,24 @@ export default function PoliciesView() {
           </Panel>
 
           <Panel className="p-5 sm:p-6">
-            <SectionTitle>Control plane</SectionTitle>
+            <SectionTitle right={<span className="rounded bg-fg/10 px-1.5 py-0.5 font-mono text-[10.5px] text-subtle">SIM</span>}>Demo engine control plane</SectionTitle>
+            <p className="-mt-1 mb-4 text-[12.5px] leading-snug text-subtle">
+              These settings belong to the in-browser demo engine. Changing them does not affect the FastAPI backend used by the Live Gateway.
+            </p>
             <ul className="space-y-3 text-[13.5px]">
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Gateway mode</span>
+                <span className="text-muted">Demo engine mode<span className="ml-2 rounded bg-fg/10 px-1 font-mono text-[10px] text-subtle">SIM</span></span>
                 <span className={cx("font-mono font-semibold", gw.mode === "FAIL_CLOSED" ? "text-red-400" : "text-emerald-400")}>{gw.mode}</span>
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Behavioral ML (M6/M7)</span>
+                <span className="text-muted">Demo behavioral ML (M6/M7)<span className="ml-2 rounded bg-fg/10 px-1 font-mono text-[10px] text-subtle">SIM</span></span>
                 <button
                   type="button"
                   role="switch"
                   aria-checked={gw.mlEnabled}
                   onClick={() => {
                     getGateway().setMlEnabled(!gw.mlEnabled);
-                    toast({ tone: "info", title: `ML layer ${gw.mlEnabled ? "disabled" : "enabled"}`, detail: gw.mlEnabled ? "Deterministic rules still veto — the gateway never fails open" : "Monotonic fusion active" });
+                    toast({ tone: "info", title: `Demo engine ML layer ${gw.mlEnabled ? "disabled" : "enabled"}`, detail: `${gw.mlEnabled ? "Deterministic rules still veto" : "Monotonic fusion active"} · simulation only, the SATG backend is not affected` });
                   }}
                   className={cx("relative h-6 w-11 rounded-full transition-colors", gw.mlEnabled ? "bg-accent" : "bg-fg/20")}
                 >
@@ -241,18 +244,22 @@ export default function PoliciesView() {
                 </button>
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Active bundle</span>
+                <span className="text-muted">Active demo bundle</span>
                 <span className="font-mono text-code">
                   {gw.bundle.version} · {gw.bundle.rules.filter((r) => r.enabled).length}/{gw.bundle.rules.length} rules
                 </span>
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Signing key</span>
+                <span className="text-muted">Demo signing key</span>
                 <span className="font-mono text-code">{gw.key.keyId}</span>
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Ingress limits</span>
+                <span className="text-muted">Demo engine ingress limits</span>
                 <span className="font-mono text-code">depth ≤ 16 · 256KB · 20 burst / 2 rps</span>
+              </li>
+              <li className="flex items-center justify-between gap-3 border-t border-line pt-3">
+                <span className="text-muted">Backend ingress limits (Live Gateway, for comparison)</span>
+                <span className="font-mono text-code">depth ≤ 8 · 64 KiB · no rate limiting</span>
               </li>
             </ul>
           </Panel>

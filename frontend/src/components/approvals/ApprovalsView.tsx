@@ -146,16 +146,16 @@ export default function ApprovalsView() {
   return (
     <div>
       <PageHeader
-        eyebrow="M3 · M11 — Two-person verification"
+        eyebrow="M3 · M11 — Two-person verification · demo engine"
         title={
           <>
             Approvals <span className="text-accent">queue</span>
           </>
         }
-        description="Tier-4 destructive calls and ML step-ups wait here. Two distinct approvers produce an Ed25519-signed capability grant bound to the exact canonical arguments — usable once, for five minutes."
+        description="Demo queue seeded by the in-browser engine: its Tier-4 destructive calls and ML step-ups wait here, and two distinct approvers produce a simulated Ed25519-signed capability grant bound to the exact canonical arguments, usable once for five minutes. Live Gateway ESCALATE results are held, not queued; an approval workflow is not implemented in the backend yet."
         actions={
           <label className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-[13px] text-muted">
-            Acting as
+            Acting as (demo operator)
             <select value={operator} onChange={(e) => setOperator(e.target.value)} className="bg-transparent font-mono text-[13px] text-fg outline-none">
               {OPERATORS.map((o) => (
                 <option key={o} value={o} className="bg-[#121118]">
@@ -177,7 +177,11 @@ export default function ApprovalsView() {
               ))}
             </AnimatePresence>
           </div>
-          {!pending.length && <Panel className="p-8 text-center text-[14px] text-subtle">Queue is clear. Run a Tier-4 call from the Live Gateway to populate it.</Panel>}
+          {!pending.length && (
+            <Panel className="p-8 text-center text-[14px] text-subtle">
+              Queue is clear. This demo queue is seeded by the in-browser engine. Live Gateway ESCALATE results are held, not queued; an approval workflow is not implemented in the backend yet.
+            </Panel>
+          )}
         </section>
 
         {active.length > 0 && (

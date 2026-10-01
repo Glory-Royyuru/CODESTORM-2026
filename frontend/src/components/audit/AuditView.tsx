@@ -46,19 +46,19 @@ export default function AuditView() {
       else firstBad ??= e.receipt.body.seq;
     });
     setChain({ ok, total: ledger.length, firstBad });
-    toast({ tone: ok === ledger.length ? "success" : "danger", title: `Hash chain ${ok === ledger.length ? "intact" : "BROKEN"}`, detail: `${ok}/${ledger.length} receipts verified (Ed25519 + SHA-256 + links)` });
+    toast({ tone: ok === ledger.length ? "success" : "danger", title: `Demo hash chain ${ok === ledger.length ? "intact" : "BROKEN"}`, detail: `${ok}/${ledger.length} demo receipts verified (Ed25519 + SHA-256 + links, in the browser)` });
   };
 
   return (
     <div>
       <PageHeader
-        eyebrow="M10 — Cryptographic audit receipts"
+        eyebrow="M10 — Cryptographic audit receipts · demo engine"
         title={
           <>
             Audit <span className="text-accent">ledger</span>
           </>
         }
-        description="Every decision — including every BLOCK — is canonicalized, Ed25519-signed and hash-chained to the previous receipt. Click any row to verify it yourself in the browser."
+        description="A simulated ledger kept by the in-browser demo engine: each demo-engine decision, including every BLOCK, is canonicalized, Ed25519-signed and hash-chained to the previous receipt, and any row can be verified in your browser. Live Gateway requests do not appear here; the SATG backend keeps its own in-memory audit log, which the API does not expose, and has no signed receipts or hash chain yet."
         actions={
           <Button variant="primary" onClick={verifyAll}>
             <ShieldCheck className="h-4 w-4" /> Verify entire chain
@@ -69,9 +69,9 @@ export default function AuditView() {
       {chain && (
         <Panel className={cx("mb-5 flex flex-wrap items-center gap-3 px-5 py-3 font-mono text-[12.5px]", chain.ok === chain.total ? "text-emerald-300" : "text-red-300")}>
           <ShieldCheck className="h-4 w-4" />
-          {chain.ok}/{chain.total} receipts verified · genesis → #{chain.total}
+          {chain.ok}/{chain.total} demo receipts verified · genesis → #{chain.total}
           {chain.firstBad && ` · first failure at #${chain.firstBad}`}
-          <span className="text-subtle">· signing key {ledger[0]?.receipt.publicKey.slice(0, 16)}…</span>
+          <span className="text-subtle">· demo signing key {ledger[0]?.receipt.publicKey.slice(0, 16)}…</span>
         </Panel>
       )}
 
