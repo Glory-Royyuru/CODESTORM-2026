@@ -1,0 +1,8 @@
+{
+  "target": 0.25884807751934386,
+  "drift": 0.11485111515576672,
+  "h": 0.6718538757802609,
+  "input_signal": "max(p_inject, p_misaligned)",
+  "formula": "S_t = max(0, S_{t-1} + x_t - target - drift); context_shift = 1 - exp(-S_t / h)",
+  "reset": "S_0 = 0 at the beginning of every session"
+}

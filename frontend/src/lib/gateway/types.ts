@@ -1,5 +1,9 @@
 /* Secure Agent Tool Gateway — shared data model */
 
+import type { EbpfSessionState, SocketEvent } from "./network/ebpf";
+import type { NetworkInspection } from "./network/firewall";
+import type { RequestIntegrityTag, WorkloadIdentity } from "./network/identity";
+
 export type Protocol = "MCP" | "OPENAI" | "REST";
 export type GatewayMode = "ENFORCING" | "FAIL_CLOSED";
 
@@ -187,6 +191,14 @@ export interface SandboxResult {
   };
   vaultLease?: { path: string; leaseId: string; ttlSeconds: number };
   egressProxy?: { host: string; pinnedIp: string; blocked: boolean };
+  /** Destination firewall result for the call's URL (resolve once, pin, deny ranges). */
+  network?: NetworkInspection;
+  /** Sockets this call opened, as seen by the eBPF egress hooks. */
+  sockets: SocketEvent[];
+  /** Tool-side check of the gateway's HMAC request-integrity tag. */
+  integrityVerified: boolean;
+  /** Why the call did not run, when it did not. */
+  refusal?: string;
   output: string;
   execMs: number;
 }
@@ -221,6 +233,12 @@ export interface ReceiptBody {
   totalLatencyMs: number;
   dlp: { redactions: number; canaryLeak: boolean; secondaryInjection: boolean };
   executed: boolean;
+  /** SHA-256 fingerprints of quarantined values (never the values themselves). */
+  anomalyFingerprints?: string[];
+  /** HMAC-SHA256 tag the gateway attached to the approved call. */
+  requestIntegrity?: RequestIntegrityTag;
+  /** Transport identity the call arrived with (simulated mTLS + SPIFFE + DPoP). */
+  workload?: { spiffeId: string; dpopJkt: string; tls: string };
   prevHash: string;
 }
 
@@ -242,6 +260,8 @@ export interface LedgerEntry {
   /** Ground-truth label for eval / time-machine replays (never signed). */
   groundTruth: "attack" | "benign";
   scenario?: string;
+  /** Anomaly-ledger ids recorded for this call. */
+  anomalyIds?: string[];
 }
 
 export interface TrifectaFlags {
@@ -298,6 +318,9 @@ export interface SessionState {
   step: number;
   quarantined: boolean;
   token: TaskToken;
+  /** Kernel-level (eBPF) egress accounting for the sandbox runner. */
+  ebpf: EbpfSessionState;
+  identity: WorkloadIdentity;
   scenario?: string;
 }
 

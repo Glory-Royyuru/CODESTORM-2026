@@ -1,6 +1,7 @@
 import YAML from "yaml";
 import { verifyText } from "./crypto";
 import type { DecodeReport } from "./decoder";
+import { hostIsDenied } from "./network/firewall";
 import { isUntrusted } from "./taint";
 import type {
   CapabilityGrant,
@@ -173,17 +174,8 @@ const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String
 const domainAllowed = (host: string, allowed: string[]) =>
   allowed.some((d) => host === d.toLowerCase() || host.endsWith("." + d.toLowerCase()));
 
-export function isPrivateHost(host: string) {
-  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
-  if (h === "localhost" || h.endsWith(".internal") || h.endsWith(".local") || h === "metadata.google.internal") return true;
-  if (h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
-  // Decimal / hex integer IPs (e.g. 2852039166 == 169.254.169.254)
-  if (/^(0x[0-9a-f]+|\d{8,10})$/.test(h)) return true;
-  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
-  if (!m) return false;
-  const [a, b] = [Number(m[1]), Number(m[2])];
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-}
+/** Local names, deny-range IP literals (IPv4 + IPv6, incl. v4-mapped) and ambiguous numeric IPs such as 2852039166. */
+export const isPrivateHost = hostIsDenied;
 
 export const argsDigest = (args: Record<string, unknown>) => sha256Hex(canonicalJson(args));
 export const grantSigningText = (g: Omit<CapabilityGrant, "signature" | "used">) => canonicalJson(g);

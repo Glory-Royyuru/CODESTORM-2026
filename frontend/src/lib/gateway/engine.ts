@@ -1,8 +1,14 @@
+import { MITIGATION, quarantineScan, type QuarantineScan } from "./anomaly/guard";
+import { AnomalyLedger, quarantineEnvelope } from "./anomaly/ledger";
 import { generateSigningKey, signText, type SigningKey } from "./crypto";
 import { decodeLayers, type DecodeReport } from "./decoder";
 import { inspectResponse } from "./dlp";
 import { IngressError, normalize, RateLimiter } from "./ingress";
 import { MlPipeline } from "./ml";
+import { newEbpfState } from "./network/ebpf";
+import { inspectDestination } from "./network/firewall";
+import { attestWorkload, generateIntegrityKey, signRequest, verifyRequest, type IntegrityKey, type RequestIntegrityTag } from "./network/identity";
+import { SimulatedDns } from "./network/resolver";
 import {
   argsDigest,
   DEFAULT_BUNDLE,
@@ -38,7 +44,7 @@ import type {
   ToolManifest,
   Verdict,
 } from "./types";
-import { hashSeed, maxVerdict, mulberry32, round, severity, shortId, stringLeaves, uuid } from "./util";
+import { hashSeed, maxVerdict, mulberry32, round, severity, sha256Hex, shortId, stringLeaves, uuid } from "./util";
 
 export interface CallRequest {
   raw: string;
@@ -47,6 +53,8 @@ export interface CallRequest {
   advertisedManifest?: ToolManifest;
   grantId?: string;
   scriptedOutput?: string;
+  /** Scripted tool misbehaviour inside the sandbox (see ScenarioStep.socket). */
+  socket?: "direct" | "rebind";
   groundTruth: "attack" | "benign";
   scenario?: string;
   now?: number;
@@ -93,6 +101,11 @@ export class Gateway {
   modeChangedAt = 0;
   mlEnabled = true;
   readonly ephemeral: boolean;
+  /** Append-only store of quarantined crypt-arithmetic anomalies (own pub/sub). */
+  readonly anomalies = new AnomalyLedger();
+  readonly dns = new SimulatedDns();
+  /** Gateway secret for application request-integrity HMACs. */
+  readonly integrityKey: IntegrityKey = generateIntegrityKey();
   private rate = new RateLimiter(20, 2);
   private ml = new MlPipeline();
   private listeners = new Set<() => void>();
@@ -123,6 +136,7 @@ export class Gateway {
     const now = opts.now ?? Date.now();
     const id = shortId("sess");
     const promptId = `${id}:prompt`;
+    const token = { token: `tt_${uuid().replace(/-/g, "")}`, scopes, sessionId: id, issuedAt: now, expiresAt: now + 300_000 };
     const session: SessionState = {
       id,
       principal,
@@ -141,7 +155,9 @@ export class Gateway {
       cusum: 0,
       step: 0,
       quarantined: false,
-      token: { token: `tt_${uuid().replace(/-/g, "")}`, scopes, sessionId: id, issuedAt: now, expiresAt: now + 300_000 },
+      token,
+      ebpf: newEbpfState(32768),
+      identity: attestWorkload(principal, token.token, now),
     };
     this.sessions.set(id, session);
     return session;
@@ -192,12 +208,32 @@ export class Gateway {
 
     /* Phase 0 — Ingress (M1) */
     let ingressOk = true;
+    let ingressDetail = "";
+    let scan: QuarantineScan | null = null;
+    const fingerprints: string[] = [];
     if (this.mode === "FAIL_CLOSED") {
       ingressOk = false;
       findings.push({ ruleId: "kill_switch", ruleVersion: "1.0.0", module: "M1", outcome: "BLOCK", reason: "global emergency kill switch engaged — gateway FAIL_CLOSED", counterfactual: "If the kill switch were disengaged, the call would be evaluated normally." });
     } else if (!this.ephemeral && !this.rate.take(session.principal.agentId, now)) {
       ingressOk = false;
       findings.push({ ruleId: "rate_limit", ruleVersion: "1.0.0", module: "M1", outcome: "BLOCK", reason: `token bucket exhausted for ${session.principal.agentId} (20 burst / 2 per s)`, counterfactual: "If the agent had stayed under its rate limit, the call would be evaluated." });
+    } else if ((scan = quarantineScan(req.raw)).anomalies.length) {
+      // Crypt-arithmetic quarantine: refused before any JSON / numeric deserialization.
+      ingressOk = false;
+      env.tool = scan.claimedTool ?? "∅";
+      for (const a of scan.anomalies) {
+        const fp = `sha256:${sha256Hex(a.raw)}`;
+        fingerprints.push(fp);
+        findings.push({
+          ruleId: `quarantine.${a.type.toLowerCase()}@${a.location}`,
+          ruleVersion: "1.0.0",
+          module: "M1",
+          outcome: "BLOCK",
+          reason: `${a.type} at ${a.location}: ${a.detail} → ${MITIGATION[a.type]}`,
+          counterfactual: `If the value with anomaly_fingerprint ${fp} were a canonical, in-range encoding, the payload would be parsed and evaluated.`,
+        });
+      }
+      ingressDetail = `quarantined ${scan.anomalies.length} crypt-arithmetic anomal${scan.anomalies.length > 1 ? "ies" : "y"} before parsing → HARD_DENY`;
     } else {
       try {
         const n = normalize(req.raw, { maxDepth: 16, maxBytes: 256 * 1024 });
@@ -210,7 +246,7 @@ export class Gateway {
         findings.push({ ruleId: `ingress.${(err.code ?? "SYNTAX").toLowerCase()}`, ruleVersion: "1.0.0", module: "M1", outcome: "BLOCK", reason: err.message, counterfactual: "If the payload were well-formed strict JSON within size/depth limits, it would be evaluated." });
       }
     }
-    stage("ingress", ingressOk ? "pass" : "fail", ingressOk ? `${env.protocol} envelope · strict JSON · rate-limit OK` : findings[0].reason);
+    stage("ingress", ingressOk ? "pass" : "fail", ingressOk ? `${env.protocol} envelope · quarantine scan clean · strict JSON · rate-limit OK` : ingressDetail || findings[0].reason);
 
     const tool = ingressOk ? this.registry.get(env.tool) : undefined;
     let decodes: (DecodeReport & { path: string })[] = [];
@@ -328,10 +364,36 @@ export class Gateway {
     const toolNodeId = `${session.id}:call:${session.step + 1}`;
     let responseAtoms: DataAtom[] = [];
 
+    let integrityTag: RequestIntegrityTag | undefined;
     if (executes && tool) {
-      sandbox = executeInSandbox(env, tool, req.scriptedOutput);
+      // Destination firewall: resolve once, check every answer, pin. The HMAC binds the pin.
+      const urlLeaf = stringLeaves(env.arguments).find((l) => /^https?:\/\//i.test(l.value));
+      const allow = (this.bundle.rules.find((r) => r.id === "destination_allowlist")?.params.url_domains as string[] | undefined) ?? [];
+      const network = urlLeaf ? inspectDestination(urlLeaf.value, allow, this.dns) : undefined;
+      const request = { decisionId: envId, sessionId: session.id, tool: env.tool, argsDigest: argsDigest(env.arguments), manifestHash: tool.currentHash, pinnedIp: network?.pinnedIp ?? null };
+      integrityTag = signRequest(request, this.integrityKey);
+      sandbox = executeInSandbox(env, tool, req.scriptedOutput, {
+        network,
+        integrity: { request, tag: integrityTag, verify: (r, t) => verifyRequest(r, t, this.integrityKey) },
+        ebpf: session.ebpf,
+        dns: this.dns,
+        socket: req.socket,
+        now,
+      });
+      if (!sandbox.executed) {
+        const ruleId = network?.decision === "HARD_DENY" ? "egress.destination_firewall" : sandbox.integrityVerified ? "ebpf.egress_enforcement" : "request_integrity";
+        verdict = maxVerdict(verdict, "BLOCK");
+        findings.push({
+          ruleId,
+          ruleVersion: "1.0.0",
+          module: "M8",
+          outcome: "BLOCK",
+          reason: sandbox.refusal ?? "sandbox refused execution",
+          counterfactual: "If every socket had gone through the egress proxy to the pinned IP, within the session's byte budget, the tool would have run.",
+        });
+      }
       if (grantOk && env.grantId) this.grants.get(env.grantId)!.used = true;
-      stage("sandbox", sandbox.executed ? "pass" : "fail", sandbox.executed ? `${sandbox.container.runtime} · ${sandbox.container.user} · exec ${sandbox.execMs}ms` : `egress proxy refused ${sandbox.egressProxy?.host}`);
+      stage("sandbox", sandbox.executed ? "pass" : "fail", sandbox.executed ? `${sandbox.container.runtime} · ${sandbox.container.user} · HMAC ✓ · exec ${sandbox.execMs}ms` : (sandbox.refusal ?? "refused"));
       lat.sandbox = sandbox.execMs;
       stages[stages.length - 1].latencyMs = sandbox.execMs;
       dlp = inspectResponse(sandbox.output, canaries);
@@ -391,12 +453,23 @@ export class Gateway {
         totalLatencyMs: round(deterministicLatencyMs + (lat.ml ?? 0), 2),
         dlp: { redactions: dlp?.redactions.reduce((a, r) => a + r.count, 0) ?? 0, canaryLeak: !!dlp?.canaryLeak, secondaryInjection: !!dlp?.secondaryInjection },
         executed: !!sandbox?.executed,
+        anomalyFingerprints: fingerprints.length ? fingerprints : undefined,
+        requestIntegrity: integrityTag,
+        workload: { spiffeId: session.identity.spiffeId, dpopJkt: session.identity.dpop.jkt, tls: `${session.identity.mtls.version} mTLS` },
         prevHash: prev?.hash ?? GENESIS_HASH,
       },
       this.key,
     );
 
-    const entry: LedgerEntry = { receipt, envelope: env, stages, sandbox, dlp, groundTruth: req.groundTruth, scenario: req.scenario };
+    const anomalyIds = scan?.anomalies.map((a) => {
+      const record = quarantineEnvelope(a, { sessionId: session.id, agentId: session.principal.agentId, tool: env.tool, receiptId: receipt.body.receiptId, at: now });
+      this.anomalies.append(record);
+      return record.anomaly_id;
+    });
+    // A forged proof-of-possession means the session's credential is suspect.
+    if (scan?.anomalies.some((a) => MITIGATION[a.type] === "ISOLATE_SESSION")) session.quarantined = true;
+
+    const entry: LedgerEntry = { receipt, envelope: env, stages, sandbox, dlp, groundTruth: req.groundTruth, scenario: req.scenario, anomalyIds };
     this.updateSession(session, env, tool, verdict, matched, responseAtoms, sandbox, nextCusum, toolNodeId, receipt.body.receiptId, findings);
 
     let approval: ApprovalRequest | undefined;

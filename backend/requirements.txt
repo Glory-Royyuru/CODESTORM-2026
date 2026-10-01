@@ -1,5 +1,20 @@
-fastapi
-uvicorn
-pydantic
-pytest
-httpx
+# SATG backend runtime (verified on Python 3.13.2, Windows 11).
+# Direct dependencies only, pinned to the verified versions; pip resolves
+# their transitive dependencies. Tests: requirements-dev.txt.
+# Training the ML model needs more (torch, skl2onnx, onnx): ml/requirements.txt.
+
+# --- Gateway -----------------------------------------------------------------
+fastapi==0.142.2
+pydantic==2.13.5
+uvicorn==0.54.0
+
+# --- ML inference (ml/src/inference, loaded by app/ml/model_loader.py) --------
+# scikit-learn must match the version the model artifacts were pickled with.
+numpy==2.5.3
+scikit-learn==1.9.0
+joblib==1.6.0
+xgboost==3.4.1
+onnxruntime==1.30.0
+# Tokenizer for the ONNX MiniLM embedder; torch is not needed for inference.
+transformers==5.18.0
+tokenizers==0.23.2

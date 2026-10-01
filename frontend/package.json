@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "check:engine": "tsx scripts/check-engine.ts",
-    "check:bench": "tsx scripts/check-bench.ts"
+    "check:bench": "tsx scripts/check-bench.ts",
+    "check:network": "tsx scripts/check-network.ts"
   },
   "dependencies": {
     "@noble/curves": "^2.4.0",

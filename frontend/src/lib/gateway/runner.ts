@@ -25,9 +25,9 @@ export function runScript(
   const results: PipelineResult[] = [];
   script.steps.forEach((step, i) => {
     const last = i === script.steps.length - 1;
-    const raw = last && opts.finalRaw ? opts.finalRaw : toWire(step.protocol ?? script.protocol, step.tool, step.args);
+    const raw = last && opts.finalRaw ? opts.finalRaw : (step.raw ?? toWire(step.protocol ?? script.protocol, step.tool, step.args));
     results.push(
-      gw.process({ raw, sessionId: session.id, scriptedOutput: step.output, rugPull: step.rugPull, groundTruth: step.groundTruth, scenario: script.scenario, now }),
+      gw.process({ raw, sessionId: session.id, scriptedOutput: step.output, rugPull: step.rugPull, socket: step.socket, groundTruth: step.groundTruth, scenario: script.scenario, now }),
     );
     now += opts.gapMs ?? 1400;
   });

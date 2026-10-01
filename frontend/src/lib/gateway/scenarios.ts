@@ -10,6 +10,10 @@ export interface ScenarioStep {
   rugPull?: boolean;
   groundTruth: "attack" | "benign";
   note: string;
+  /** Exact wire payload, for bodies JSON.stringify cannot produce (e.g. 2^256 literals). */
+  raw?: string;
+  /** The tool opens its own socket: "direct" to the metadata IP, or "rebind" (re-resolves the host at connect). */
+  socket?: "direct" | "rebind";
 }
 
 export interface Scenario {

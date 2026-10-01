@@ -135,7 +135,7 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (p
             <span className="text-fg/85">{BACKEND_ENDPOINT}</span>
             <span className="text-subtle">· FastAPI SATG backend via /api/satg</span>
           </p>
-          <p className="text-[11.5px] text-subtle">agent_id is self-asserted (no authentication yet) · the gateway returns a verdict only — no tool is executed</p>
+          <p className="text-[11.5px] text-subtle">agent_id is self-asserted (no authentication yet) · allowed calls run in a disposable, network-less Docker sandbox</p>
         </div>
 
         {/* payload editor */}
@@ -177,7 +177,7 @@ export default function AttackStudio({ busy, onRun }: { busy: boolean; onRun: (p
             {busy ? "Waiting for SATG backend…" : "Send Through Gateway"}
           </button>
           <span className="flex items-center gap-2 text-[12px] text-subtle" title="What this example is designed to trigger — not a result">
-            designed for <VerdictBadge verdict={expectedVerdict === "ALLOW" ? "ALLOW" : "BLOCK"} />
+            designed for <VerdictBadge verdict={expectedVerdict === "ALLOW" ? "ALLOW" : expectedVerdict === "ESCALATE" ? "HUMAN_APPROVAL" : "BLOCK"} />
             <span className="font-mono">{expectedRule.join(" · ")}</span>
           </span>
         </div>

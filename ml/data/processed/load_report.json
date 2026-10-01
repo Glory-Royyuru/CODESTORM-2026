@@ -1,0 +1,71 @@
+{
+  "reports": {
+    "train": {
+      "split": "train",
+      "total_records": 9081,
+      "accepted": 9081,
+      "rejected_total": 0,
+      "rejected_by_reason": {},
+      "categories": {
+        "benign": 2891,
+        "attacked": 4008,
+        "hard_negative": 1093,
+        "failed_attack": 1089
+      },
+      "step_labels": {
+        "benign": 37463,
+        "injection_point": 4008,
+        "hijacked": 8947,
+        "failed_injection": 1089
+      }
+    },
+    "val": {
+      "split": "val",
+      "total_records": 1733,
+      "accepted": 1733,
+      "rejected_total": 0,
+      "rejected_by_reason": {},
+      "categories": {
+        "hard_negative": 203,
+        "failed_attack": 193,
+        "attacked": 753,
+        "benign": 584
+      },
+      "step_labels": {
+        "benign": 7128,
+        "failed_injection": 193,
+        "injection_point": 753,
+        "hijacked": 1647
+      }
+    },
+    "test": {
+      "split": "test",
+      "total_records": 1722,
+      "accepted": 1722,
+      "rejected_total": 0,
+      "rejected_by_reason": {},
+      "categories": {
+        "failed_attack": 218,
+        "benign": 525,
+        "attacked": 775,
+        "hard_negative": 204
+      },
+      "step_labels": {
+        "benign": 7048,
+        "failed_injection": 218,
+        "injection_point": 775,
+        "hijacked": 1755
+      }
+    }
+  },
+  "task_overlap": {
+    "train-val": 0,
+    "train-test": 0,
+    "val-test": 0
+  },
+  "unique_tasks": {
+    "train": 180,
+    "val": 35,
+    "test": 35
+  }
+}

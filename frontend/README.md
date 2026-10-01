@@ -3,20 +3,20 @@
 The SATG console: a Next.js app that demonstrates a zero-trust firewall sitting between AI agents and the tools they call.
 The visual style comes from the React Bits landing page (dark background, orange glow ribbon, cursor-reactive dot grid, glass panels).
 
-The **Live Gateway** (`/`) is connected to the real SATG backend in [`backend/`](../backend/README.md) — the FastAPI Phase 1–5 deterministic gateway. The backend is the only security authority: the console sends the request, shows the backend's verdict, and never decides anything itself. No tool is executed.
+The **Live Gateway** (`/`) is connected to the real SATG backend in [`backend/`](../backend/README.md): the FastAPI deterministic gateway, its ML risk layer and its Docker sandbox. The backend is the only security authority: the console sends the request, shows the backend's verdict (ALLOW / ESCALATE / BLOCK), the ML assessment and the sandbox result, and never decides anything itself. Tools run only in the backend's sandbox, never in the console.
 
 All **other screens** (Provenance, Registry, Audit, Eval Lab, Policies, Approvals, the kill switch) still run on an in-browser TypeScript demo engine (`src/lib/gateway/`) and are labelled as simulations in the UI.
 
 ## Run it
 
-Start the backend first (see the [root README](../README.md#run-locally)), then, from this directory:
+Start the backend first (see the [root README](../README.md#quickstart)), then, from this directory:
 
 ```bash
 npm install
 npm run dev          # http://localhost:3000
 ```
 
-The console reaches the backend through its own same-origin proxy, so no CORS setup is needed. The backend address is read server-side from `SATG_BACKEND_URL` (default `http://127.0.0.1:8000`); to change it, copy `.env.example` to `.env.local`. If the backend is down, the Live Gateway shows a network error and no verdict.
+The console reaches the backend through its own same-origin proxy, so no CORS setup is needed. The backend address is read server-side from `SATG_BACKEND_URL` (default `http://127.0.0.1:8000`); to change it, copy `.env.example` to `.env.local`. If the backend is down, the Live Gateway shows a network error and no verdict. The proxy waits up to 25 s for the backend (enough for the default ML timeout and sandbox timeout); the browser gives up after 30 s.
 
 Checks (all run from `frontend/`):
 
@@ -32,7 +32,7 @@ npm run check:bench  # demo engine: run the benchmark suites headlessly
 
 ```
 browser ──POST /api/satg/v1/toolcalls──▶ Next.js route handler ──POST /v1/toolcalls──▶ FastAPI SATG backend
-        ◀── backend status + body, unchanged ──                  ◀── Verdict (ALLOW / BLOCK) ──
+        ◀── backend status + body, unchanged ──                  ◀── Verdict (ALLOW / ESCALATE / BLOCK) ──
 ```
 
 - `src/app/api/satg/v1/toolcalls/route.ts` and `src/app/api/satg/health/route.ts` forward to the backend (`src/lib/satg/proxy.ts`). The raw request bytes and `Content-Type` are forwarded unchanged, so the backend's strict ingress judges exactly what the user typed. The backend's status code and body are relayed unchanged.
@@ -42,7 +42,7 @@ browser ──POST /api/satg/v1/toolcalls──▶ Next.js route handler ──P
 
 ## The mental model of the demo engine (read this first)
 
-> This section describes the full 11-module design as implemented by the in-browser demo engine. The real backend currently implements the deterministic front half (ingress → canonicalize → registry → parameters → destination → policy decision → audit) and returns ALLOW/BLOCK only.
+> This section describes the full 11-module design as implemented by the in-browser **demo engine** (simulation, not a security control). The real backend implements ingress → canonicalize → registry → parameters → destination → policy decision → ML risk → HMAC request integrity → Docker sandbox → in-memory audit, and returns ALLOW / ESCALATE / BLOCK. It has no DLP, signed receipts, hash chain, taint tracking or approval workflow; those exist only in the demo engine below.
 
 1. An **agent** (e.g. `agent:research-assistant@v3.2`) works for a **user** (e.g. `u_maya`) inside a **session** that has a goal ("Summarize the Q3 partner report…") and a short-lived token listing what it may do (`db:read`, `email:send`, …).
 2. Every tool call the agent makes (a JSON payload in MCP, OpenAI-function or REST format) goes through the gateway **pipeline**:

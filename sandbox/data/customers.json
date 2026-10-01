@@ -1,0 +1,5 @@
+{
+  "_note": "Synthetic fixture data for the SATG sandbox demo. Not real people.",
+  "CUST-1042": {"name": "Ava Thompson (synthetic)", "tier": "enterprise", "open_tickets": 2, "email": "ava.thompson@example.com"},
+  "CUST-2077": {"name": "Liam O'Connor (synthetic)", "tier": "smb", "open_tickets": 0, "email": "liam.oconnor@example.com"}
+}

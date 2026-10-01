@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from collections import deque
@@ -21,6 +22,19 @@ if not _logger.handlers:
     _logger.propagate = False
 
 
+def _redacted(verdict: Dict[str, Any]) -> Dict[str, Any]:
+    """Tool output can carry private data: the audit log keeps its SHA-256
+    and size, never the output itself. ML context text is never in a verdict."""
+    execution = verdict.get("execution")
+    if isinstance(execution, dict):
+        for stream in ("stdout", "stderr"):
+            data = (execution.pop(stream, "") or "").encode("utf-8")
+            execution[f"{stream}_sha256"] = hashlib.sha256(data).hexdigest()
+            execution[f"{stream}_bytes"] = len(data)
+        execution.pop("result", None)
+    return verdict
+
+
 def record_audit_event(verdict: Verdict, principal: Optional[Principal] = None) -> Dict[str, Any]:
     """Record one gateway decision -- ALLOW, BLOCK, or an ingress rejection.
 
@@ -31,7 +45,7 @@ def record_audit_event(verdict: Verdict, principal: Optional[Principal] = None) 
     """
     event = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        **verdict.model_dump(mode="json"),
+        **_redacted(verdict.model_dump(mode="json")),
         "authenticated": principal.authenticated if principal else False,
         "auth_method": principal.auth_method if principal else None,
     }

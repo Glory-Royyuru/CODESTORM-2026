@@ -23,7 +23,7 @@ export default function LiveTelemetry() {
       <div className="grid grid-cols-2 gap-4">
         <Stat label="Backend verdicts" value={verdicts} hint="received in this tab (resets on reload)" />
         <Stat label="Blocked" value={`${((blocked / Math.max(1, verdicts)) * 100).toFixed(1)}%`} hint={`${blocked} of ${verdicts} verdicts`} tone="text-red-400" />
-        <Stat label="Allowed" value={count("ALLOWED")} hint="verdict only — nothing executed" tone="text-emerald-400" />
+        <Stat label="Allowed" value={count("ALLOWED")} hint="run in a disposable Docker sandbox" tone="text-emerald-400" />
         <Stat
           label="p95 round trip"
           value={`${percentile(entries.map((e) => e.outcome.roundTripMs), 95).toFixed(1)}ms`}

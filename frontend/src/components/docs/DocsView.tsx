@@ -52,7 +52,7 @@ export default function DocsView() {
             Secure Agent Tool Gateway, <span className="text-accent">in 11 modules</span>
           </>
         }
-        description="A zero-trust, provenance-aware runtime firewall that sits synchronously between autonomous agents and their tools. The Live Gateway is backed by the real SATG backend (FastAPI, Phase 1–5 deterministic core). The other screens illustrate the full 11-module design with an in-browser simulation."
+        description="A zero-trust, provenance-aware runtime firewall that sits synchronously between autonomous agents and their tools. The Live Gateway is backed by the real SATG backend (FastAPI deterministic core, escalation-only ML risk layer and Docker sandbox). The other screens illustrate the full 11-module design with an in-browser simulation."
       />
 
       <section>
@@ -120,8 +120,10 @@ export default function DocsView() {
               Every request sent from the Live Gateway goes to <code className="font-mono text-code">POST /v1/toolcalls</code> on the FastAPI backend, which is
               the only security authority: strict ingress (64 KiB limit, UTF-8 JSON, duplicate keys, depth ≤ 8, NaN/Infinity, content type), NFKC
               canonicalization and invisible-character rejection, request hashing, the hash-pinned tool registry, agent permissions, manifest-driven
-              parameter validation, email destination allowlists, one deterministic policy decision and a server-side audit record. The console only
-              displays the backend&apos;s verdict; it never decides, and no tool is executed.
+              parameter validation, email and URL destination allowlists with private-IP denial and DNS pinning, one deterministic policy decision, an
+              ML risk score that can only escalate or block an allowed call (and blocks it, ML-003, if the model is unavailable or times out), an
+              HMAC-SHA256 tag on every ALLOW, and a disposable, network-less, non-root Docker container that runs only a final ALLOW. Every decision is
+              kept in an in-memory audit log. The console only displays the backend&apos;s verdict; it never decides.
             </p>
           </div>
           <div>
