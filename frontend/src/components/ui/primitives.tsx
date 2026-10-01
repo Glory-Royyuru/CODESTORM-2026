@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Check, Copy, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { TaintLattice, ToolStatus, Verdict } from "@/lib/gateway/types";
-import { STATUS_STYLE, TAINT_HEX, VERDICT_STYLE } from "./tokens";
+import { STATUS_STYLE, TAINT_HEX, VERDICT_DISPLAY, VERDICT_FAMILY_STYLE } from "./tokens";
 
 export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
@@ -14,10 +14,13 @@ export function Panel({ className, children }: { className?: string; children: R
   return <div className={cx("panel", className)}>{children}</div>;
 }
 
+/** A demo-engine verdict shown in the backend's vocabulary: ALLOW / ESCALATE / BLOCK, plus a qualifier such as "· quarantine". */
 export function VerdictBadge({ verdict, size = "sm" }: { verdict: Verdict; size?: "sm" | "lg" }) {
-  const s = VERDICT_STYLE[verdict];
+  const d = VERDICT_DISPLAY[verdict];
+  const s = VERDICT_FAMILY_STYLE[d.family];
   return (
     <span
+      title={`Demo-engine verdict: ${verdict}`}
       className={cx(
         "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md font-mono font-semibold ring-1",
         s.fg,
@@ -27,7 +30,8 @@ export function VerdictBadge({ verdict, size = "sm" }: { verdict: Verdict; size?
       )}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.hex }} />
-      {verdict}
+      {d.family}
+      {d.qualifier && <span className="font-normal opacity-75">· {d.qualifier}</span>}
     </span>
   );
 }
@@ -54,15 +58,66 @@ export function PageHeader({ eyebrow, title, description, actions }: { eyebrow: 
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-      className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"
+      className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"
     >
       <div className="max-w-3xl">
-        <p className="mb-3 font-mono text-[12px] font-medium uppercase tracking-[0.14em] text-accent">{eyebrow}</p>
-        <h1 className="text-[clamp(2rem,3.4vw,3.25rem)] font-medium leading-[1.05] tracking-[-0.035em] text-fg">{title}</h1>
-        {description && <p className="mt-4 text-[16px] leading-relaxed text-muted">{description}</p>}
+        <p className="mb-2 font-mono text-[11.5px] font-medium uppercase tracking-[0.14em] text-accent">{eyebrow}</p>
+        <h1 className="text-[clamp(1.6rem,2.2vw,2.125rem)] font-medium leading-[1.15] tracking-[-0.025em] text-fg">{title}</h1>
+        {description && <p className="mt-2.5 text-[14.5px] leading-relaxed text-muted">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-3">{actions}</div>}
     </motion.div>
+  );
+}
+
+/** The standard marker for anything run by the in-browser demo engine rather than the SATG backend. */
+export function DemoTag({ label = "SIM", title = "Simulated by the in-browser demo engine, not the SATG backend", className }: { label?: string; title?: string; className?: string }) {
+  return (
+    <span title={title} className={cx("rounded bg-fg/10 px-1 font-mono text-[10px] text-subtle", className)}>
+      {label}
+    </span>
+  );
+}
+
+/** Segmented tabs in the console's outlined style (active = orange outline, as in the Live Gateway's detail toggles). */
+export function Tabs<T extends string>({
+  items,
+  value,
+  onChange,
+  size = "md",
+  label,
+  className,
+}: {
+  items: readonly { id: T; label: ReactNode; count?: number }[];
+  value: T;
+  onChange: (id: T) => void;
+  size?: "sm" | "md";
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <div role="tablist" aria-label={label} className={cx("flex w-fit rounded-xl border border-line bg-surface p-1", className)}>
+      {items.map((t) => {
+        const active = t.id === value;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.id)}
+            className={cx(
+              "flex items-center gap-2 rounded-lg border font-semibold transition-colors",
+              size === "md" ? "px-3.5 py-2 text-[13.5px]" : "px-3 py-1.5 text-[13px]",
+              active ? "border-accent/50 bg-accent/10 text-fg" : "border-transparent text-muted hover:text-fg",
+            )}
+          >
+            {t.label}
+            {t.count !== undefined && <span className="font-mono text-[11px] opacity-70">{t.count}</span>}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

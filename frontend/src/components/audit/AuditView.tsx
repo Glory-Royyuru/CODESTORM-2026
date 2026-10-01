@@ -2,7 +2,7 @@
 
 import { ScrollText, ShieldAlert, ShieldCheck, Search } from "lucide-react";
 import { useState } from "react";
-import { Button, cx, Hash, Modal, PageHeader, Panel, VerdictBadge } from "@/components/ui/primitives";
+import { Button, cx, Hash, Modal, PageHeader, Panel, Tabs, VerdictBadge } from "@/components/ui/primitives";
 import { verifyReceipt } from "@/lib/gateway/receipts";
 import type { Verdict } from "@/lib/gateway/types";
 import { useAnomalyLedger, useGateway, useUi } from "@/lib/store";
@@ -75,44 +75,29 @@ export default function AuditView() {
         </Panel>
       )}
 
-      <div className="mb-5 flex w-fit rounded-xl border border-line bg-surface p-1">
-        {(
-          [
-            { id: "receipts", label: "Receipt ledger", icon: ScrollText, count: ledger.length },
-            { id: "anomalies", label: "Anomaly Inspector", icon: ShieldAlert, count: anomalyCount },
-          ] as const
-        ).map((x) => (
-          <button
-            key={x.id}
-            type="button"
-            onClick={() => setView(x.id)}
-            className={cx("flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-colors", view === x.id ? "bg-accent text-[#1a0d03]" : "text-muted hover:text-fg")}
-          >
-            <x.icon className="h-4 w-4" />
-            {x.label}
-            <span className="font-mono text-[11px] opacity-70">{x.count}</span>
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="mb-5"
+        label="Audit view"
+        value={view}
+        onChange={setView}
+        items={[
+          { id: "receipts", label: <><ScrollText className="h-4 w-4" />Receipt ledger</>, count: ledger.length },
+          { id: "anomalies", label: <><ShieldAlert className="h-4 w-4" />Anomaly Inspector</>, count: anomalyCount },
+        ]}
+      />
 
       {view === "anomalies" ? (
         <AnomalyInspector onOpenReceipt={setSelected} />
       ) : (
         <Panel className="overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex rounded-xl border border-line bg-surface p-1">
-              {TABS.map((x) => (
-                <button
-                  key={x.id}
-                  type="button"
-                  onClick={() => setTab(x.id)}
-                  className={cx("rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors", tab === x.id ? "bg-accent text-[#1a0d03]" : "text-muted hover:text-fg")}
-                >
-                  {x.label}
-                  <span className="ml-1.5 font-mono text-[11px] opacity-70">{ledger.filter((e) => x.match(e.receipt.body.verdict)).length}</span>
-                </button>
-              ))}
-            </div>
+            <Tabs
+              size="sm"
+              label="Filter receipts by verdict"
+              value={tab}
+              onChange={setTab}
+              items={TABS.map((x) => ({ id: x.id, label: x.label, count: ledger.filter((e) => x.match(e.receipt.body.verdict)).length }))}
+            />
             <label className="flex h-10 items-center gap-2 rounded-xl border border-line bg-black/20 px-3 sm:w-80">
               <Search className="h-4 w-4 text-subtle" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by tool, session, agent, hash…" className="w-full bg-transparent text-[13.5px] text-fg outline-none placeholder:text-subtle" />

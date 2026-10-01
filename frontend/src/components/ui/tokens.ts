@@ -9,6 +9,36 @@ export const VERDICT_STYLE: Record<Verdict, { fg: string; bg: string; ring: stri
   BLOCK: { fg: "text-red-400", bg: "bg-red-500/10", ring: "ring-red-500/30", hex: "#f87171" },
 };
 
+/**
+ * How a demo-engine verdict is *displayed*: one of the three families the real
+ * backend uses (ALLOW / ESCALATE / BLOCK) plus an optional qualifier. The
+ * demo engine's six verdict values are unchanged; only their presentation is.
+ * VERDICT_STYLE above stays as is: the Live Gateway reads it directly.
+ */
+export type VerdictFamily = "ALLOW" | "ESCALATE" | "BLOCK";
+
+export const VERDICT_DISPLAY: Record<Verdict, { family: VerdictFamily; qualifier?: string }> = {
+  ALLOW: { family: "ALLOW" },
+  MONITOR: { family: "ALLOW", qualifier: "monitor" },
+  STEP_UP: { family: "ESCALATE", qualifier: "step-up" },
+  HUMAN_APPROVAL: { family: "ESCALATE", qualifier: "approval" },
+  QUARANTINE: { family: "BLOCK", qualifier: "quarantine" },
+  BLOCK: { family: "BLOCK" },
+};
+
+/** Family colours: the same styles the Live Gateway uses (ESCALATE is violet). */
+export const VERDICT_FAMILY_STYLE: Record<VerdictFamily, (typeof VERDICT_STYLE)[Verdict]> = {
+  ALLOW: VERDICT_STYLE.ALLOW,
+  ESCALATE: VERDICT_STYLE.HUMAN_APPROVAL,
+  BLOCK: VERDICT_STYLE.BLOCK,
+};
+
+/** Display label for a demo-engine verdict, e.g. "BLOCK · quarantine". */
+export function verdictLabel(verdict: Verdict): string {
+  const d = VERDICT_DISPLAY[verdict];
+  return d.qualifier ? `${d.family} · ${d.qualifier}` : d.family;
+}
+
 export const TAINT_HEX: Record<TaintLattice, string> = {
   TRUSTED: "#34d399",
   INTERNAL: "#60a5fa",

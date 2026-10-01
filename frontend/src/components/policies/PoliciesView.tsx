@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, History, Rocket, RotateCcw, Sparkles, XCircle } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { Button, cx, PageHeader, Panel, SectionTitle, VerdictBadge } from "@/components/ui/primitives";
+import { Button, cx, DemoTag, PageHeader, Panel, SectionTitle, VerdictBadge } from "@/components/ui/primitives";
 import { bundleToYaml, yamlToBundle } from "@/lib/gateway/policy";
 import { timeMachine, type ReplayReport } from "@/lib/gateway/runner";
 import type { PolicyBundle } from "@/lib/gateway/types";
@@ -219,17 +219,17 @@ export default function PoliciesView() {
           </Panel>
 
           <Panel className="p-5 sm:p-6">
-            <SectionTitle right={<span className="rounded bg-fg/10 px-1.5 py-0.5 font-mono text-[10.5px] text-subtle">SIM</span>}>Demo engine control plane</SectionTitle>
+            <SectionTitle right={<DemoTag />}>Demo engine control plane</SectionTitle>
             <p className="-mt-1 mb-4 text-[12.5px] leading-snug text-subtle">
               These settings belong to the in-browser demo engine. Changing them does not affect the FastAPI backend used by the Live Gateway.
             </p>
             <ul className="space-y-3 text-[13.5px]">
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Demo engine mode<span className="ml-2 rounded bg-fg/10 px-1 font-mono text-[10px] text-subtle">SIM</span></span>
+                <span className="text-muted">Demo engine mode<DemoTag className="ml-2" /></span>
                 <span className={cx("font-mono font-semibold", gw.mode === "FAIL_CLOSED" ? "text-red-400" : "text-emerald-400")}>{gw.mode}</span>
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Demo behavioral ML (M6/M7)<span className="ml-2 rounded bg-fg/10 px-1 font-mono text-[10px] text-subtle">SIM</span></span>
+                <span className="text-muted">Demo behavioral ML (M6/M7)<DemoTag className="ml-2" /></span>
                 <button
                   type="button"
                   role="switch"
