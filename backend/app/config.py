@@ -12,8 +12,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SANDBOX_MODES = ("docker", "off")
+# required: ML failure or timeout blocks (ML-003, fail closed). Shipped default.
 # advisory: ML failure keeps the deterministic decision (ml/integration_contract.md §1.4)
-# required: ML failure blocks (fail closed)
 # off:      ML is not consulted
 ML_MODES = ("advisory", "required", "off")
 
@@ -38,6 +38,8 @@ class Settings:
     ml_high_risk_threshold: float
     # fused_risk >= critical -> BLOCK
     ml_critical_risk_threshold: float
+    # Upper bound on one prediction (model loading is not included).
+    ml_timeout_seconds: float
 
 
 def _env(name: str, default: str) -> str:
@@ -83,12 +85,13 @@ def load_settings() -> Settings:
         sandbox_timeout=_number("SANDBOX_TIMEOUT", "10", float, 1.0, 120.0),
         sandbox_max_output_bytes=_number("SANDBOX_MAX_OUTPUT_BYTES", "16384", int, 1024, 1_048_576),
         docker_bin=_env("DOCKER_BIN", "docker"),
-        ml_mode=_choice("ML_MODE", "advisory", ML_MODES),
+        ml_mode=_choice("ML_MODE", "required", ML_MODES),
         ml_package_dir=ml_dir,
         ml_model_path=Path(_env("ML_MODEL_PATH", str(ml_dir / "artifacts"))),
         ml_model_version=_env("ML_MODEL_VERSION", "satg-ml-v0.1"),
         ml_high_risk_threshold=high,
         ml_critical_risk_threshold=critical,
+        ml_timeout_seconds=_number("ML_TIMEOUT_SECONDS", "3.0", float, 0.1, 30.0),
     )
 
 

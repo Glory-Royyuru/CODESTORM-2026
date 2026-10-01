@@ -60,9 +60,14 @@ Resolver = Callable[[str], List[str]]
 
 def system_resolver(hostname: str) -> List[str]:
     """Resolve with the OS resolver, bounded by DNS_TIMEOUT_SECONDS."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+    # Not a `with` block: its exit waits for a hung lookup and defeats the
+    # timeout. A timed-out lookup finishes in the background and is discarded.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
         future = pool.submit(socket.getaddrinfo, hostname, 443, type=socket.SOCK_STREAM)
         infos = future.result(timeout=DNS_TIMEOUT_SECONDS)
+    finally:
+        pool.shutdown(wait=False)
     return list(dict.fromkeys(info[4][0] for info in infos))
 
 

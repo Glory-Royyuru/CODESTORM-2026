@@ -11,7 +11,11 @@
  */
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
-const TIMEOUT_MS = 10_000;
+// Must cover the backend's worst normal path with the default settings:
+// DNS pin 2 s + ML_TIMEOUT_SECONDS 3 s + SANDBOX_TIMEOUT 10 s (container
+// start included) + container clean-up and margin. Raise it with those.
+// The client's own timeout (client.ts) is longer, so this 504 reaches it.
+const TIMEOUT_MS = 25_000;
 // Resource guard for the proxy itself. The backend's own 64 KiB ingress limit
 // (INGRESS-003) is stricter and stays authoritative; bodies between 64 KiB and
 // this cap are forwarded so the backend can reject and audit them.

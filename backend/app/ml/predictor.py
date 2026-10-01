@@ -3,6 +3,7 @@ auditable MLAssessment. It never decides ALLOW/BLOCK (decision_engine.py
 does), never executes anything, and never raises: failures come back as an
 assessment with status "unavailable" or "error"."""
 
+import concurrent.futures
 import logging
 import math
 import time
@@ -19,6 +20,28 @@ _log = logging.getLogger("satg.ml")
 SIGNALS = ("p_inject", "p_misaligned", "anomaly_score", "sequence_surprisal", "context_shift")
 # Threshold the ML package used for its reported precision/recall (ml/README.md §9).
 PREDICTION_THRESHOLD = 0.5
+
+# Every prediction runs on this one worker so the request thread can stop
+# waiting after ML_TIMEOUT_SECONDS. Python cannot kill a running thread: a
+# timed-out prediction keeps the worker busy until it returns, and calls
+# queued behind it time out too (failing closed in ML_MODE=required). The
+# executor is never shut down per call -- shutdown would wait for a stuck
+# prediction and defeat the timeout. One worker also serializes access to
+# the model's in-process caches.
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="satg-ml")
+
+
+class InferenceTimeout(Exception):
+    pass
+
+
+def _predict(model, request, timeout: float):
+    future = _executor.submit(model.predict, request)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        future.cancel()  # drops it if still queued; a running prediction cannot be stopped
+        raise InferenceTimeout(f"inference timed out after {timeout}s") from None
 
 
 def _finite(value) -> float:
@@ -44,7 +67,7 @@ class MLRiskEngine:
         request, context_used = build_ml_request(envelope, tool)
         started = time.perf_counter()
         try:
-            result = loaded.model.predict(request)
+            result = _predict(loaded.model, request, self.settings.ml_timeout_seconds)
             risk = _finite(result.fused_risk)
             if not 0.0 <= risk <= 1.0:
                 raise ValueError("fused_risk outside [0, 1]")
@@ -59,6 +82,12 @@ class MLRiskEngine:
                 for f in result.top_risk_features
             ]
             level = loaded.ml_level(result)
+        except InferenceTimeout as error:
+            _log.error("ML %s for %s (ML_TIMEOUT_SECONDS)", error, envelope.request_id)
+            return MLAssessment(
+                status="error", mode=mode, model_version=loaded.model_version,
+                feature_version=loaded.feature_version, detail=str(error),
+            )
         except Exception as error:
             _log.exception("ML inference failed for %s", envelope.request_id)
             return MLAssessment(

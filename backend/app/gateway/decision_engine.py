@@ -3,8 +3,8 @@
   deterministic BLOCK                       -> BLOCK (ML is not consulted)
   ML fused_risk >= ML_CRITICAL_RISK_THRESHOLD -> BLOCK    (ML-002)
   ML fused_risk >= ML_HIGH_RISK_THRESHOLD     -> ESCALATE (ML-001; held for review, never executed)
-  ML unavailable, ML_MODE=required           -> BLOCK    (ML-003, fail closed)
-  ML unavailable, ML_MODE=advisory           -> deterministic decision stands (ml/integration_contract.md §1.4)
+  ML unavailable/error/timeout, ML_MODE=required -> BLOCK (ML-003, fail closed; the default)
+  ML unavailable/error/timeout, ML_MODE=advisory -> deterministic decision stands (ml/integration_contract.md §1.4)
   otherwise                                  -> ALLOW
 
 ML can only make a decision more restrictive. The default thresholds are

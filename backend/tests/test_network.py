@@ -156,3 +156,20 @@ def test_ambiguous_urls_are_malformed(client, dns, url):
 def test_inspection_reports_every_check():
     result = inspect_url("url", "https://10.0.0.1/", ALLOWLIST)
     assert [c.check for c in result.checks] == list(network.ALL_URL_CHECKS)
+
+
+def test_system_resolver_timeout_is_enforced(monkeypatch):
+    """A hung OS lookup is abandoned after DNS_TIMEOUT_SECONDS, not awaited."""
+    import threading
+    import time
+
+    release = threading.Event()
+    monkeypatch.setattr(network, "DNS_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(network.socket, "getaddrinfo", lambda *a, **k: release.wait(10) and [])
+    started = time.perf_counter()
+    try:
+        with pytest.raises(TimeoutError):
+            network.system_resolver("hung.example")
+        assert time.perf_counter() - started < 2
+    finally:
+        release.set()

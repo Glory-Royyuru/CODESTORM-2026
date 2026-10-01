@@ -29,6 +29,8 @@ interface Tile {
   label: string;
   icon: LucideIcon;
   status: TileStatus;
+  /** Overrides the generic status word on the tile. */
+  text?: string;
   detail: string;
 }
 
@@ -53,12 +55,12 @@ const STATUS_CLS: Record<TileStatus, string> = {
   skip: "border-line bg-surface text-subtle",
 };
 
-const STATUS_TEXT: Record<TileStatus, string> = { pass: "passed", warn: "escalate", fail: "failed", skip: "not evaluated" };
+const STATUS_TEXT: Record<TileStatus, string> = { pass: "passed", warn: "warning", fail: "failed", skip: "not evaluated" };
 
 const STEP_MS = 220;
 
 export function SatgVerdictBadge({ verdict, size = "sm" }: { verdict: SatgVerdictType; size?: "sm" | "lg" }) {
-  // ESCALATE is reserved by the backend (never emitted yet); it reuses the violet "hold" colour.
+  // ESCALATE (ML-001: held for review, never executed) reuses the violet "hold" colour.
   const s = VERDICT_STYLE[verdict === "ESCALATE" ? "HUMAN_APPROVAL" : verdict];
   return (
     <span
@@ -74,6 +76,30 @@ export function SatgVerdictBadge({ verdict, size = "sm" }: { verdict: SatgVerdic
       {verdict}
     </span>
   );
+}
+
+/** The ML tile shows what the backend did with the assessment; it never derives a verdict itself. */
+function mlTile(v: SatgVerdict): Tile {
+  const ml = v.ml;
+  const base = { key: "__ml", label: "ML risk", icon: BrainCircuit };
+  if (!ml || ml.status === "not_consulted") {
+    return { ...base, status: "skip", detail: "Not consulted — the deterministic policy already refused the call." };
+  }
+  if (ml.status === "disabled") return { ...base, status: "skip", text: "disabled", detail: "ML_MODE=off — the ML layer is not consulted." };
+  if (ml.status !== "ok") {
+    // ML-003: ML_MODE=required and no usable assessment (unavailable, error or timeout): blocked, fail closed.
+    const blocked = v.rule_id === "ML-003";
+    return {
+      ...base,
+      status: blocked ? "fail" : "warn",
+      text: blocked ? "unavailable · blocked" : "unavailable",
+      detail: `ML ${ml.status}${ml.detail ? `: ${ml.detail}` : ""} · ML_MODE=${ml.mode}${blocked ? " — blocked (ML-003, fail closed)" : " — deterministic decision kept"}`,
+    };
+  }
+  const detail = `risk ${ml.risk_score?.toFixed(3)} · level ${ml.risk_level} · ${ml.model_version}`;
+  if (v.rule_id === "ML-002") return { ...base, status: "fail", text: "blocked", detail };
+  if (v.rule_id === "ML-001") return { ...base, status: "warn", text: "escalate", detail };
+  return { ...base, status: "pass", detail };
 }
 
 function tilesFor(v: SatgVerdict): Tile[] {
@@ -93,19 +119,7 @@ function tilesFor(v: SatgVerdict): Tile[] {
     const meta = CHECKS[c] ?? { label: c, icon: ShieldCheck };
     tiles.push({ key: c, label: meta.label, icon: meta.icon, status: "skip", detail: `${c} was not evaluated — the backend stops at the first failed check.` });
   }
-  const ml = v.ml;
-  tiles.push({
-    key: "__ml",
-    label: "ML risk",
-    icon: BrainCircuit,
-    status: !ml || ml.status === "not_consulted" || ml.status === "disabled" ? "skip" : ml.status !== "ok" ? "warn" : v.rule_id.startsWith("ML-") ? (v.verdict === "BLOCK" ? "fail" : "warn") : "pass",
-    detail:
-      ml?.status === "ok"
-        ? `risk ${ml.risk_score?.toFixed(3)} · level ${ml.risk_level} · ${ml.model_version}`
-        : ml?.status === "not_consulted" || !ml
-          ? "Not consulted — the deterministic policy already refused the call."
-          : `ML ${ml.status}${ml.detail ? `: ${ml.detail}` : ""}`,
-  });
+  tiles.push(mlTile(v));
   tiles.push({
     key: "__policy",
     label: "Policy decision",
@@ -119,6 +133,7 @@ function tilesFor(v: SatgVerdict): Tile[] {
     label: "Docker sandbox",
     icon: Container,
     status: !e || e.status === "not_executed" ? "skip" : e.status === "success" ? "pass" : e.status === "tool_error" || e.status === "rejected" ? "warn" : "fail",
+    text: e && e.status !== "success" && e.status !== "not_executed" ? e.status.replace("_", " ") : undefined,
     detail: e
       ? `${e.status}${e.exit_code !== null ? ` · exit ${e.exit_code}` : ""}${e.duration_ms !== null ? ` · ${e.duration_ms} ms` : ""}${e.error ? ` · ${e.error}` : ""}`
       : `Not started — ${v.verdict} never reaches the sandbox.`,
@@ -303,7 +318,7 @@ export default function PipelineRun({ run, onDone }: { run: StudioRun | null; on
                       {i === active && !done && <motion.span layoutId="stage-glow" className="absolute inset-0 rounded-xl bg-accent/10" />}
                       <t.icon className="h-5 w-5" />
                       <span className="text-[11.5px] font-semibold leading-tight">{t.label}</span>
-                      <span className="font-mono text-[10.5px] opacity-80">{reached ? STATUS_TEXT[t.status] : "…"}</span>
+                      <span className="font-mono text-[10.5px] opacity-80">{reached ? (t.text ?? STATUS_TEXT[t.status]) : "…"}</span>
                     </button>
                   </li>
                 );
@@ -320,7 +335,7 @@ export default function PipelineRun({ run, onDone }: { run: StudioRun | null; on
                 className="mt-4 rounded-xl border border-line bg-black/25 p-4 font-mono text-[12.5px] leading-relaxed"
               >
                 <span className="text-accent">{tiles[shown]?.label}</span>
-                <span className="text-subtle"> · {tiles[shown] && STATUS_TEXT[tiles[shown].status]}</span>
+                <span className="text-subtle"> · {tiles[shown] && (tiles[shown].text ?? STATUS_TEXT[tiles[shown].status])}</span>
                 <p className="mt-1 break-words text-code">{tiles[shown]?.detail}</p>
               </motion.div>
             </AnimatePresence>

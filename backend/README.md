@@ -22,7 +22,7 @@ POST /v1/toolcalls
   → Destination     egress declared in the manifest, strict address parsing, allowlist;
                     URL egress: IPv4/IPv6 deny ranges, eTLD+1 allowlist, DNS resolve-once-and-pin (DEST-*)
   → Policy engine   single deterministic ALLOW/BLOCK decision (BASE-001 / POLICY-*)
-  → ML risk         only for a deterministic ALLOW: ml/ package risk score (advisory)
+  → ML risk         only for a deterministic ALLOW: ml/ package risk score (can only make the decision stricter)
   → Decision        deterministic BLOCK stays BLOCK; ML may escalate to ESCALATE / BLOCK (ML-*)
   → Integrity       ALLOW verdicts carry an HMAC-SHA256 tag over the approved request
   → Sandbox         final ALLOW only: HMAC + request_hash verified, then one disposable container
@@ -110,7 +110,8 @@ Identity (who is calling) and request integrity (what was approved) are separate
 - **Input:** [`feature_extractor.py`](app/ml/feature_extractor.py) builds the `MLRequest` deterministically: canonical tool and parameters, the registry description, the egress allowlists as known domains, and optional caller context (`context.task`, `context.observation`, `context.previous_steps`). The context is unauthenticated, but ML can only restrict.
 - **Output (`verdict.ml`):** `risk_score` (calibrated `fused_risk`), `risk_level` (from `ml/configs/decision_thresholds.json`), `prediction` (at 0.5), the five signals, the 11 numeric fusion features, and `top_factors` (XGBoost contributions). No request text is echoed.
 - **Decision ([`decision_engine.py`](app/gateway/decision_engine.py)):** deterministic BLOCK → BLOCK, and ML is not consulted. Otherwise risk ≥ critical (0.80) → BLOCK `ML-002`, risk ≥ high (0.60) → ESCALATE `ML-001`, else ALLOW. `verdict.decision` records the deterministic result, the thresholds and the final result.
-- **Failure:** by default (`ML_MODE=advisory`), an unavailable model or failed inference keeps the deterministic decision, as the ML integration contract requires. The failure is reported in `verdict.ml.status`, not hidden. `ML_MODE=required` blocks instead (`ML-003`).
+- **Failure:** by default (`ML_MODE=required`), an unavailable model, a failed inference or a timed-out inference blocks a deterministic ALLOW (`ML-003`, fail closed). `ML_MODE=advisory` keeps the deterministic decision instead, which is the behaviour the ML integration contract (§1.4) describes; `ML_MODE=off` does not consult ML. Either way the failure is reported in `verdict.ml.status` (`unavailable` / `error`) and `verdict.ml.detail`, not hidden. A deterministic BLOCK is never changed by any mode.
+- **Timeout:** each prediction runs on one dedicated worker thread and the request stops waiting after `ML_TIMEOUT_SECONDS` (default 3 s; measured on the development machine: about 0.07–0.27 s for typical calls, under 1 s near the 64 KiB body limit). A timeout is reported as `ml.status = "error"` with `detail: "inference timed out after …s"`. Model loading is not timed. Python cannot stop a running thread, so a stuck prediction keeps that worker busy until it returns; calls queued behind it time out as well (and are blocked under `ML_MODE=required`) instead of hanging.
 
 ## Sandbox
 
@@ -121,6 +122,27 @@ Identity (who is calling) and request integrity (what was approved) are separate
 - **In the container ([`../sandbox/runner.py`](../sandbox/runner.py)):** a fixed entrypoint runs one registered tool from a static table, re-checks its argument schema, and uses read-only synthetic fixtures. Unknown tools or bad arguments exit 2. It never evaluates input, runs a shell, or resolves DNS.
 - **`verdict.execution`:** `sandbox_id`, `status` (`success`, `tool_error`, `rejected`, `timeout`, `killed`, `sandbox_unavailable`, `integrity_failed`, `error`, `not_executed`), `exit_code`, `duration_ms`, `stdout`/`stderr` (capped), the parsed `result`, `error` and `container_removed`. The audit log keeps only a hash and size of the output.
 - **Docker unavailable:** the result is `sandbox_unavailable`. There is no host fallback.
+
+## Configuration
+
+All settings are environment variables with built-in defaults ([app/config.py](app/config.py)); an invalid value stops start-up. [`.env.example`](.env.example) lists every variable the code reads, with its default. **The backend does not load `.env` files**: export the variables in the shell that runs uvicorn.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ML_MODE` | `required` | `required`: ML failure/timeout → BLOCK `ML-003`; `advisory`: deterministic decision stands; `off`: ML not consulted |
+| `ML_TIMEOUT_SECONDS` | `3.0` | Bound on one prediction (0.1–30) |
+| `ML_HIGH_RISK_THRESHOLD` / `ML_CRITICAL_RISK_THRESHOLD` | `0.60` / `0.80` | ESCALATE (`ML-001`) / BLOCK (`ML-002`) |
+| `ML_PACKAGE_DIR` / `ML_MODEL_PATH` | `../ml` / `../ml/artifacts` | ML package and artifacts |
+| `ML_MODEL_VERSION` | `satg-ml-v0.1` | The loaded model must report exactly this version |
+| `SANDBOX_MODE` | `docker` | `docker`: run each final ALLOW in a container; `off`: verdict only, nothing executed |
+| `SANDBOX_IMAGE` | `satg-sandbox:0.1` | Locally built image (`--pull never`) |
+| `SANDBOX_MEMORY` / `SANDBOX_CPUS` / `SANDBOX_PIDS_LIMIT` | `256m` / `0.5` / `64` | Container limits |
+| `SANDBOX_TIMEOUT` | `10` | Seconds per container run, start-up included (1–120) |
+| `SANDBOX_MAX_OUTPUT_BYTES` | `16384` | Cap on stdout/stderr returned |
+| `DOCKER_BIN` | `docker` | Docker CLI |
+| `SATG_GATEWAY_HMAC_SECRET` | random per process | HMAC key for `request_integrity` (≥ 32 bytes) |
+
+The console's proxy waits up to 25 s for a verdict ([`../frontend/src/lib/satg/proxy.ts`](../frontend/src/lib/satg/proxy.ts)): DNS pinning (2 s) + `ML_TIMEOUT_SECONDS` (3 s) + `SANDBOX_TIMEOUT` (10 s) + container clean-up and margin. Raise it if you raise those.
 
 ## Identity
 
@@ -178,17 +200,18 @@ backend/
 
 ## Requirements
 
-- Python 3.14 (tested on 3.14.7). The ML inference stack (numpy, scikit-learn 1.9.0, xgboost, onnxruntime, transformers without torch) installs from wheels on 3.14. scikit-learn is pinned to the version the model artifacts were pickled with.
+- Python 3.13 (verified on 3.13.2, Windows 11, including a fresh virtual environment built from `requirements-dev.txt`). The ML package's authors report 3.14 as well; that was not re-verified here. The ML inference stack (numpy, scikit-learn 1.9.0, xgboost, onnxruntime, transformers/tokenizers, no torch) installs from wheels. scikit-learn is pinned to the version the model artifacts were pickled with.
+- `requirements.txt` holds the runtime (gateway + ML inference); `requirements-dev.txt` adds the test tools (pytest, httpx). Training the model needs [`../ml/requirements.txt`](../ml/requirements.txt).
 - Docker with Linux containers, and the image built once: `docker build -t satg-sandbox:0.1 ../sandbox`
 
 ## Setup
 
 ```bash
 cd backend
-python -m venv venv
-venv\Scripts\activate      # Windows
-# source venv/bin/activate # macOS/Linux
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\activate      # Windows
+# source .venv/bin/activate # macOS/Linux
+pip install -r requirements-dev.txt   # or requirements.txt to run without tests
 ```
 
 ## Run the Server
@@ -204,7 +227,7 @@ Server runs at `http://127.0.0.1:8000`. Interactive docs: `/docs`.
 
 ```bash
 cd backend
-python -m pytest                 # unit + integration + Docker security tests (Docker tests skip without a daemon)
+python -m pytest                 # all 294 tests: 278 unit/integration + 16 Docker security tests (these skip without a daemon)
 python -m pytest -m "not docker"
 python -m eval.attack_lab        # scenarios through the real pipeline -> eval/results/
 ```

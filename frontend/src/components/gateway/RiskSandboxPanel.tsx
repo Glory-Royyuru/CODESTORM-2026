@@ -71,9 +71,12 @@ function MlStep({ v }: { v: SatgVerdict }) {
         ? "Not consulted: the deterministic policy already refused the call. ML can never relax a BLOCK."
         : ml.status === "disabled"
           ? "ML_MODE=off."
-          : `ML ${ml.status}${ml.detail ? `: ${ml.detail}` : ""} (ML_MODE=${ml.mode}).`;
+          : `ML ${ml.status}${ml.detail ? `: ${ml.detail}` : ""} (ML_MODE=${ml.mode}). ${
+              v.rule_id === "ML-003" ? "Blocked: ML is required and no assessment was available (ML-003, fail closed)." : "The deterministic decision was kept."
+            }`;
+    const failed = ml && (ml.status === "unavailable" || ml.status === "error");
     return (
-      <Step icon={BrainCircuit} title="ML risk assessment" state={ml && (ml.status === "unavailable" || ml.status === "error") ? "warn" : "skip"}>
+      <Step icon={BrainCircuit} title="ML risk assessment" state={!failed ? "skip" : v.rule_id === "ML-003" ? "fail" : "warn"}>
         <p className="text-[12.5px] leading-snug text-subtle">{why}</p>
       </Step>
     );
@@ -147,7 +150,7 @@ function DecisionStep({ v }: { v: SatgVerdict }) {
       ) : (
         <p className="text-[12.5px] text-subtle">Refused at {v.stage} before the policy/ML stages ({v.rule_id}).</p>
       )}
-      <p className="mt-3 text-[11.5px] leading-snug text-subtle">ML can only escalate: it never relaxes a deterministic BLOCK. Only a final ALLOW is signed and sent to the sandbox.</p>
+      <p className="mt-3 text-[11.5px] leading-snug text-subtle">ML can only make a decision stricter: it never relaxes a deterministic BLOCK. Only a final ALLOW is signed and sent to the sandbox.</p>
     </Step>
   );
 }

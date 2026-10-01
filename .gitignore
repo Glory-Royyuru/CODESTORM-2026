@@ -6,10 +6,16 @@
 .env.*
 !.env.example
 
-# Python bytecode and caches (any directory)
+# Python bytecode, caches and virtual environments (any directory)
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
+venv/
+
+# Training datasets are cloned locally (see ml/README.md), never committed.
+ml/data/raw/AgentDrift/
+ml/data/raw/InjecAgent/
 
 # OS / editor files
 .DS_Store

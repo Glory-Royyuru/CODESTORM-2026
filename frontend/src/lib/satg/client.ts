@@ -16,7 +16,9 @@ export const HEALTH_PATH = "/api/satg/health";
 /** The backend endpoint the proxy forwards to. */
 export const BACKEND_ENDPOINT = "POST /v1/toolcalls";
 
-const CLIENT_TIMEOUT_MS = 15_000;
+// Longer than the proxy's backend timeout (25 s, proxy.ts), so a slow
+// backend surfaces as the proxy's BACKEND_TIMEOUT rather than a bare abort.
+const CLIENT_TIMEOUT_MS = 30_000;
 
 /* ---------- backend contract (mirrors backend/app/models/verdict.py) ---------- */
 

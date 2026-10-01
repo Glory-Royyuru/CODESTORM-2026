@@ -28,6 +28,15 @@ It is **not production-ready** (see §14).
 | **InjecAgent** (1,054 cases × base/enhanced) | **external evaluation only**, never trained on | github.com/uiuc-kang-lab/InjecAgent |
 | BIPIA, LLMail-Inject, Nemotron, Toucan, AgentDojo, MCPTox, agent-egress-bench, ASB | not used (P2 / evaluation-only per plan §4, §34) | — |
 
+The datasets are **not in this repository** and are only needed for training/evaluation, not for inference.
+Clone them at the revisions the model was trained and evaluated on:
+
+```bash
+git clone https://github.com/Asif-0209/AgentDrift ml/data/raw/AgentDrift && git -C ml/data/raw/AgentDrift checkout 014a514fa998b4ac4519579fceb8a5884b379bda
+git clone https://github.com/uiuc-kang-lab/InjecAgent ml/data/raw/InjecAgent && git -C ml/data/raw/InjecAgent checkout f19c9f2c79a41046eb13c03c51a24c567a8ffa07
+```
+(Both folders are git-ignored.)
+
 Split statistics (task-disjoint, 0 task templates shared, verified at train time):
 
 | split | trajectories | steps | positive steps | benign / attacked / failed / hard-neg |
@@ -185,4 +194,6 @@ top_risk_features: [{feature, value, contribution}], latency_ms`. Everything is 
 See **`integration_contract.md`**. In short: the gateway builds an `MLRequest` from the canonical call,
 calls `predict`, and passes the result to `fuse_decision(deterministic, result)`. That function returns
 `BLOCK` whenever the deterministic decision is `BLOCK`, can only raise restriction otherwise, and falls back
-to the deterministic decision if ML is unavailable.
+to the deterministic decision if ML is unavailable. The SATG backend applies its own equivalent fusion
+(`backend/app/gateway/decision_engine.py`); its default `ML_MODE=required` is stricter than that fallback
+and blocks (`ML-003`) when ML is unavailable, fails or exceeds `ML_TIMEOUT_SECONDS`.

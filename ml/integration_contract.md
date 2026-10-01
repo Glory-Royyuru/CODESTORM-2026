@@ -19,6 +19,10 @@ MLRequest ──► SATGMLModel.predict() ──► MLRiskResult ──► Decis
 3. The ML package never executes tools, never returns ALLOW/BLOCK itself, and holds no credentials.
 4. If the ML layer is unavailable, times out or raises, keep the deterministic decision
    (`fuse_decision(det, None)` returns `det`).
+   *Gateway deployment note:* the SATG backend (`backend/app/gateway/decision_engine.py`) follows this
+   rule only with `ML_MODE=advisory`. Its shipped default, `ML_MODE=required`, is stricter: an unavailable,
+   failing or timed-out ML layer blocks a deterministic ALLOW (`ML-003`). Neither mode can relax a
+   deterministic BLOCK. `fuse_decision` itself is unchanged.
 5. Phase 1–5 rule IDs and logic are untouched. The ML package is self-contained under `ml/`.
 
 ## 2. Usage

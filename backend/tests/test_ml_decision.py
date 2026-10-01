@@ -1,13 +1,18 @@
 """Unit tests: ML feature extraction, inference, failure handling and the
 decision engine. No Docker (SANDBOX_MODE=off)."""
 
+import threading
+import time
+
 import pytest
 
 from app.config import get_settings
 from app.gateway.decision_engine import final_verdict
 from app.gateway.policy_engine import CheckOutcome, DecisionContext, decide
 from app.gateway.registry import get_tool
+from app.ml import predictor
 from app.ml.feature_extractor import build_ml_request
+from app.ml.model_loader import get_model
 from app.models.envelope import Principal, ToolCallEnvelope
 from app.models.verdict import MLAssessment, MLFactor, Severity
 
@@ -116,6 +121,21 @@ def test_multi_step_exfiltration_is_blocked_by_ml(client):
     assert body["request_integrity"] is None
 
 
+def test_injected_context_with_customer_data_escalates(client):
+    """The console's ESCALATE preset (frontend/src/lib/satg/presets.ts, ml-escalate), scored by the real model."""
+    body = client.post("/v1/toolcalls", json={
+        "agent_id": "support-bot-3",
+        "tool": "send_email",
+        "parameters": {"to": "user@company.com", "subject": "Support", "body": "ava@northwind.io, liam@globex.com"},
+        "context": {"task": "Summarize the partner report", "observation": INJECTION},
+    }).json()
+    settings = get_settings()
+    assert body["decision"]["deterministic_verdict"] == "ALLOW"
+    assert body["verdict"] == "ESCALATE" and body["rule_id"] == "ML-001"
+    assert settings.ml_high_risk_threshold <= body["ml"]["risk_score"] < settings.ml_critical_risk_threshold
+    assert body["request_integrity"] is None and body["execution"] is None
+
+
 def test_high_threshold_escalates(client, configure):
     configure(ML_HIGH_RISK_THRESHOLD="0.0", ML_CRITICAL_RISK_THRESHOLD="1.0")
     body = client.post("/v1/toolcalls", json=WEATHER).json()
@@ -202,3 +222,94 @@ def test_ml_can_never_relax_a_block():
         result = final_verdict(blocked, ml, get_settings())
         assert result.verdict.value == "BLOCK" and result.rule_id == "TOOL-003"
         assert result.ml.status == "not_consulted"
+
+
+# ------------------------------------------------------------ shipped default and inference timeout
+
+
+def test_shipped_default_fails_closed(monkeypatch):
+    for name in ("ML_MODE", "ML_TIMEOUT_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.ml_mode == "required"
+    assert settings.ml_timeout_seconds == 3.0
+
+
+@pytest.mark.parametrize("value", ["0.05", "30.5", "abc", "nan", "inf"])
+def test_invalid_ml_timeout_is_rejected(configure, value):
+    with pytest.raises(ValueError):
+        configure(ML_TIMEOUT_SECONDS=value)
+
+
+@pytest.fixture
+def stalled_model(configure, monkeypatch):
+    """Replace predict with one that blocks until the test ends, then drain
+    the single ML worker so later tests start with it idle."""
+    release = threading.Event()
+    calls = []
+
+    def stall(_request):
+        calls.append(time.perf_counter())
+        release.wait(30)
+        raise RuntimeError("released")
+
+    def install(**env):
+        settings = configure(ML_TIMEOUT_SECONDS="0.3", **env)
+        monkeypatch.setattr(get_model(settings).model, "predict", stall)
+        return calls
+
+    yield install
+    release.set()
+    predictor._executor.submit(lambda: None).result(timeout=30)
+
+
+def timed_post(client, body):
+    started = time.perf_counter()
+    response = client.post("/v1/toolcalls", json=body)
+    return response, time.perf_counter() - started
+
+
+def test_timeout_required_blocks_ml_003(client, stalled_model):
+    calls = stalled_model(ML_MODE="required")
+    response, elapsed = timed_post(client, WEATHER)
+    body = response.json()
+    assert response.status_code == 200
+    assert body["verdict"] == "BLOCK" and body["rule_id"] == "ML-003"
+    assert body["decision"]["deterministic_verdict"] == "ALLOW"
+    assert body["ml"]["status"] == "error" and "timed out after 0.3s" in body["ml"]["detail"]
+    assert body["request_integrity"] is None and body["execution"] is None
+    assert len(calls) == 1
+    assert elapsed < 5  # the request stopped waiting; the stalled prediction is still running
+
+
+def test_timeout_advisory_keeps_deterministic_allow(client, stalled_model):
+    stalled_model(ML_MODE="advisory")
+    body = client.post("/v1/toolcalls", json=WEATHER).json()
+    assert body["verdict"] == "ALLOW" and body["rule_id"] == "BASE-001"
+    assert body["ml"]["status"] == "error" and "timed out" in body["ml"]["detail"]
+    assert body["request_integrity"] is not None
+
+
+def test_requests_queued_behind_a_stalled_prediction_also_fail_closed(client, stalled_model):
+    calls = stalled_model(ML_MODE="required")
+    first, _ = timed_post(client, WEATHER)
+    second, elapsed = timed_post(client, WEATHER)
+    assert first.json()["rule_id"] == "ML-003"
+    assert second.json()["rule_id"] == "ML-003" and "timed out" in second.json()["ml"]["detail"]
+    assert len(calls) == 1  # the second prediction never started
+    assert elapsed < 5
+
+
+def test_deterministic_block_never_waits_for_ml(client, stalled_model):
+    calls = stalled_model(ML_MODE="required")
+    response, elapsed = timed_post(client, {**WEATHER, "tool": "send_email"})  # agent not authorized
+    assert response.json()["rule_id"] == "TOOL-003"
+    assert response.json()["ml"]["status"] == "not_consulted"
+    assert calls == [] and elapsed < 5
+
+
+def test_prediction_within_timeout_is_scored(client, configure):
+    configure(ML_MODE="required", ML_TIMEOUT_SECONDS="30")
+    body = client.post("/v1/toolcalls", json=WEATHER).json()
+    assert body["verdict"] == "ALLOW" and body["ml"]["status"] == "ok"
