@@ -133,7 +133,7 @@ function tilesFor(v: SatgVerdict): Tile[] {
     label: "Docker sandbox",
     icon: Container,
     status: !e || e.status === "not_executed" ? "skip" : e.status === "success" ? "pass" : e.status === "tool_error" || e.status === "rejected" ? "warn" : "fail",
-    text: e && e.status !== "success" && e.status !== "not_executed" ? e.status.replace("_", " ") : undefined,
+    text: !e || e.status === "not_executed" ? "not executed" : e.status !== "success" ? e.status.replace("_", " ") : undefined,
     detail: e
       ? `${e.status}${e.exit_code !== null ? ` · exit ${e.exit_code}` : ""}${e.duration_ms !== null ? ` · ${e.duration_ms} ms` : ""}${e.error ? ` · ${e.error}` : ""}`
       : `Not started — ${v.verdict} never reaches the sandbox.`,
@@ -150,7 +150,16 @@ function Field({ label, value, missing }: { label: string; value: string | null;
   );
 }
 
-function VerdictDetails({ outcome }: { outcome: Extract<SatgOutcome, { kind: "verdict" }> }) {
+/** The exact request body, indented for reading (shown as sent if it is not valid JSON). */
+function prettyJson(body: string): string {
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+}
+
+function VerdictDetails({ outcome, requestBody }: { outcome: Extract<SatgOutcome, { kind: "verdict" }>; requestBody: string }) {
   const v = outcome.verdict;
   const internal = v.rule_id === "GATEWAY-001";
   const summary =
@@ -192,7 +201,9 @@ function VerdictDetails({ outcome }: { outcome: Extract<SatgOutcome, { kind: "ve
 
       <div className="rounded-lg border border-accent/25 bg-accent/5 p-3 text-[12.5px] leading-snug text-fg/85">{summary}</div>
 
-      <dl className="divide-y divide-line/60">
+      <details>
+        <summary className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline">Request identifiers</summary>
+      <dl className="mt-2 divide-y divide-line/60">
         <Field label="request_id" value={v.request_id} />
         <Field label="agent_id" value={v.agent_id} missing="— not readable from the request" />
         <Field label="tool" value={v.tool} missing="— not readable from the request" />
@@ -202,6 +213,12 @@ function VerdictDetails({ outcome }: { outcome: Extract<SatgOutcome, { kind: "ve
         <Field label="policy" value={v.policy_version} />
         <Field label="round trip" value={`${outcome.roundTripMs} ms (measured in browser)`} />
       </dl>
+      </details>
+
+      <details>
+        <summary className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline">View request JSON</summary>
+        <JsonBlock value={prettyJson(requestBody)} className="mt-2 max-h-[280px]" />
+      </details>
 
       <details className="group">
         <summary className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline">Raw backend response</summary>
@@ -282,7 +299,7 @@ export default function PipelineRun({ run, onDone }: { run: StudioRun | null; on
           ))}
         </div>
         <p className="text-[14px] text-muted">
-          Pick a request and press <span className="text-accent">Send Through Gateway</span> to see the real backend&apos;s checks and verdict.
+          Send an agent request (or a manual tool call) to see the real backend&apos;s checks and verdict here.
         </p>
       </Panel>
     );
@@ -297,7 +314,7 @@ export default function PipelineRun({ run, onDone }: { run: StudioRun | null; on
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_460px]">
       <Panel className="p-5 sm:p-6">
-        <SectionTitle right={<span className="font-mono text-[12px] text-subtle">round trip {outcome.roundTripMs}ms</span>}>Backend checks · {run.preset.title}</SectionTitle>
+        <SectionTitle right={<span className="font-mono text-[12px] text-subtle">round trip {outcome.roundTripMs}ms</span>}>Backend checks · {run.title}</SectionTitle>
 
         {tiles.length > 0 ? (
           <>
@@ -372,7 +389,7 @@ export default function PipelineRun({ run, onDone }: { run: StudioRun | null; on
         <AnimatePresence mode="wait">
           {done ? (
             <motion.div key="v" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}>
-              {outcome.kind === "verdict" ? <VerdictDetails outcome={outcome} /> : <ErrorDetails outcome={outcome} />}
+              {outcome.kind === "verdict" ? <VerdictDetails outcome={outcome} requestBody={run.requestBody} /> : <ErrorDetails outcome={outcome} />}
             </motion.div>
           ) : (
             <motion.p key="p" className="font-mono text-[13px] text-subtle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

@@ -7,8 +7,10 @@ import { cx, VerdictBadge } from "@/components/ui/primitives";
 import { BACKEND_ENDPOINT, type SatgOutcome } from "@/lib/satg/client";
 import { PRESETS, type RequestPreset } from "@/lib/satg/presets";
 
+/** One real backend exchange shown by the Live Gateway panels (from this editor or the agent console). */
 export interface StudioRun {
-  preset: RequestPreset;
+  /** What was sent: the preset's title, or the agent instruction. */
+  title: string;
   requestBody: string;
   outcome: SatgOutcome;
   runId: number;

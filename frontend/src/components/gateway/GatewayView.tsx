@@ -1,14 +1,15 @@
 "use client";
 
 import { motion, type Variants } from "framer-motion";
-import { ArrowRight, BrainCircuit, Container, ServerCog, ShieldBan } from "lucide-react";
+import { ArrowRight, BrainCircuit, ChevronDown, Container, ServerCog, ShieldBan } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { categorize, submitToolCall } from "@/lib/satg/client";
 import { useSatgLog } from "@/lib/satg/log";
 import type { RequestPreset } from "@/lib/satg/presets";
 import { useUi } from "@/lib/store";
-import AgentConsole from "./AgentConsole";
+import { cx } from "@/components/ui/primitives";
+import AgentConsole, { type AgentResult } from "./AgentConsole";
 import AttackStudio, { type StudioRun } from "./AttackStudio";
 import EgressInspector from "./EgressInspector";
 import RiskSandboxPanel from "./RiskSandboxPanel";
@@ -31,6 +32,7 @@ const STATS = [
 export default function GatewayView() {
   const [run, setRun] = useState<StudioRun | null>(null);
   const [busy, setBusy] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const runSeq = useRef(0);
   const toast = useUi((s) => s.toast);
   const log = useSatgLog((s) => s.add);
@@ -40,9 +42,14 @@ export default function GatewayView() {
     // The verdict comes only from the backend; errors are shown as errors, never as a verdict.
     const outcome = await submitToolCall(body);
     log(preset.title, outcome);
-    setRun({ preset, requestBody: body, outcome, runId: ++runSeq.current });
+    setRun({ title: preset.title, requestBody: body, outcome, runId: ++runSeq.current });
     document.getElementById("pipeline")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  // The agent console made the one backend request itself; the panels below show that same response.
+  const onAgentResult = useCallback(({ title, requestBody, outcome }: AgentResult) => {
+    setRun({ title, requestBody, outcome, runId: ++runSeq.current });
+  }, []);
 
   const onDone = useCallback(() => {
     setBusy(false);
@@ -124,11 +131,29 @@ export default function GatewayView() {
           </motion.p>
         </motion.div>
 
-        <AttackStudio busy={busy} onRun={onRun} />
+        <div id="agent" className="scroll-mt-28">
+          <AgentConsole onResult={onAgentResult} />
+        </div>
       </section>
 
-      <section id="agent" className="scroll-mt-28">
-        <AgentConsole />
+      <section id="manual" className="scroll-mt-28">
+        <button
+          type="button"
+          aria-expanded={manualOpen}
+          onClick={() => setManualOpen((o) => !o)}
+          className="flex w-full items-center justify-between gap-4 rounded-xl border border-line bg-surface px-5 py-3.5 text-left transition-colors hover:bg-surface-hover"
+        >
+          <span>
+            <span className="block text-[13px] font-semibold uppercase tracking-[0.1em] text-subtle">Advanced · Manual tool call</span>
+            <span className="mt-0.5 block text-[13px] text-muted">Edit and send a raw POST /v1/toolcalls JSON body, with presets for every rule.</span>
+          </span>
+          <ChevronDown className={cx("h-5 w-5 shrink-0 text-muted transition-transform", manualOpen && "rotate-180")} />
+        </button>
+        {manualOpen && (
+          <div className="mt-4 max-w-[760px]">
+            <AttackStudio busy={busy} onRun={onRun} />
+          </div>
+        )}
       </section>
 
       <section id="pipeline" className="scroll-mt-28">

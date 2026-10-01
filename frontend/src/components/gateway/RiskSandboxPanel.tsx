@@ -65,11 +65,17 @@ function RiskBar({ score, high, critical }: { score: number; high: number; criti
 function MlStep({ v }: { v: SatgVerdict }) {
   const ml = v.ml;
   const d = v.decision;
-  if (!ml || ml.status !== "ok" || ml.risk_score === null) {
+  if (!ml || ml.status === "not_consulted") {
+    return (
+      <Step icon={BrainCircuit} title="ML risk assessment" state="skip">
+        <p className="font-mono text-[13px] font-semibold text-fg/85">NOT EVALUATED</p>
+        <p className="mt-1 text-[12.5px] leading-snug text-subtle">A deterministic security rule ({v.rule_id}) blocked the request before ML scoring. ML can never relax a BLOCK.</p>
+      </Step>
+    );
+  }
+  if (ml.status !== "ok" || ml.risk_score === null) {
     const why =
-      !ml || ml.status === "not_consulted"
-        ? "Not consulted: the deterministic policy already refused the call. ML can never relax a BLOCK."
-        : ml.status === "disabled"
+      ml.status === "disabled"
           ? "ML_MODE=off."
           : `ML ${ml.status}${ml.detail ? `: ${ml.detail}` : ""} (ML_MODE=${ml.mode}). ${
               v.rule_id === "ML-003" ? "Blocked: ML is required and no assessment was available (ML-003, fail closed)." : "The deterministic decision was kept."
@@ -100,7 +106,9 @@ function MlStep({ v }: { v: SatgVerdict }) {
           escalate ≥ {high} · block ≥ {critical}
         </span>
       </p>
-      <ul className="mt-3 space-y-1">
+      <details className="mt-3">
+        <summary className="cursor-pointer text-[12px] font-semibold text-accent hover:underline">Signals and model details</summary>
+      <ul className="mt-2 space-y-1">
         {Object.entries(ml.signals).map(([k, value]) => (
           <li key={k} className="grid grid-cols-[132px_minmax(0,1fr)_40px] items-center gap-2 font-mono text-[11px]">
             <span className="truncate text-muted">{SIGNAL_LABELS[k] ?? k}</span>
@@ -120,6 +128,7 @@ function MlStep({ v }: { v: SatgVerdict }) {
       <p className="mt-1 font-mono text-[10.5px] text-subtle">
         {ml.model_version} · {ml.latency_ms ?? "?"} ms · context: {ml.context_used.length ? ml.context_used.join(", ") : "none supplied"}
       </p>
+      </details>
     </Step>
   );
 }
@@ -160,7 +169,10 @@ function SandboxStep({ v }: { v: SatgVerdict }) {
   if (!e)
     return (
       <Step icon={Container} title="Docker sandbox" state="skip">
-        <p className="text-[12.5px] leading-snug text-subtle">No container was started: the final verdict is {v.verdict}. BLOCK and ESCALATE never reach the sandbox.</p>
+        <p className="font-mono text-[13px] font-semibold text-fg/85">NOT EXECUTED</p>
+        <p className="mt-1 text-[12.5px] leading-snug text-subtle">
+          Execution was withheld because the request did not receive a final ALLOW ({v.verdict} · {v.rule_id}). No container was started.
+        </p>
       </Step>
     );
   return (
@@ -175,7 +187,9 @@ function SandboxStep({ v }: { v: SatgVerdict }) {
       </div>
       {e.error && <p className="mt-2 break-words font-mono text-[11.5px] text-amber-200/90">{e.error}</p>}
       {e.result ? <JsonBlock value={e.result} className="mt-3 max-h-[200px] text-[11.5px]" /> : e.stdout ? <JsonBlock value={e.stdout} className="mt-3 max-h-[160px] text-[11.5px]" /> : null}
-      <ul className="mt-3 flex flex-wrap gap-1.5">
+      <details className="mt-3">
+        <summary className="cursor-pointer text-[12px] font-semibold text-accent hover:underline">Sandbox details</summary>
+      <ul className="mt-2 flex flex-wrap gap-1.5">
         {HARDENING.map((h) => (
           <li key={h} className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-subtle">
             {h}
@@ -183,6 +197,7 @@ function SandboxStep({ v }: { v: SatgVerdict }) {
         ))}
       </ul>
       {e.sandbox_id && <p className="mt-2 font-mono text-[10.5px] text-subtle">{e.sandbox_id}</p>}
+      </details>
     </Step>
   );
 }
@@ -203,6 +218,10 @@ export default function RiskSandboxPanel({ run }: { run: StudioRun | null }) {
           <DecisionStep v={v} />
           <SandboxStep v={v} />
         </motion.div>
+      ) : run ? (
+        <p className="rounded-xl border border-dashed border-amber-400/40 bg-amber-400/5 p-6 text-center text-[13.5px] text-amber-200/90">
+          No backend verdict for the last request, so nothing was evaluated or executed.
+        </p>
       ) : (
         <p className="rounded-xl border border-dashed border-line p-6 text-center text-[13.5px] text-muted">
           Send a request to see the ML risk score, how it combined with the deterministic policy, and what happened in the Docker sandbox.
