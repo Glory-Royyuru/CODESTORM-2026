@@ -41,7 +41,7 @@ export default function GatewayView() {
     setBusy(true);
     // The verdict comes only from the backend; errors are shown as errors, never as a verdict.
     const outcome = await submitToolCall(body);
-    log(preset.title, outcome);
+    log(preset.title, outcome, body, "studio");
     setRun({ title: preset.title, requestBody: body, outcome, runId: ++runSeq.current });
     document.getElementById("pipeline")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };

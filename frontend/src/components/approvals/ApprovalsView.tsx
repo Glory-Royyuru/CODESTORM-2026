@@ -2,9 +2,14 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { BadgeCheck, Ban, KeyRound, Play, Repeat, UserCheck, Users } from "lucide-react";
-import { useState } from "react";
+import Link from "next/link";
+import { useMemo, useState, type ReactNode } from "react";
+import { SatgVerdictBadge } from "@/components/gateway/PipelineRun";
+import { LiveChip } from "@/components/provenance/LiveTraceView";
 import { Button, cx, DemoTag, Disclosure, Hash, JsonBlock, PageHeader, Panel, SectionTitle, timeAgo, VerdictBadge } from "@/components/ui/primitives";
 import type { ApprovalRequest, Verdict } from "@/lib/gateway/types";
+import { toLiveTraces, type LiveTrace } from "@/lib/satg/liveTrace";
+import { useSatgLog } from "@/lib/satg/log";
 import { getGateway, useGateway, useUi } from "@/lib/store";
 
 const OPERATORS = ["secops-lead (Dana K.)", "platform-owner (Leo V.)", "treasury-lead (Alex M.)", "ciso-delegate (Rin T.)"];
@@ -140,6 +145,88 @@ function ApprovalCard({ a, operator }: { a: ApprovalRequest; operator: string })
   );
 }
 
+function LiveFact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-1">
+      <dt className="text-subtle">{label}</dt>
+      <dd className="min-w-0 truncate text-right text-code">{children}</dd>
+    </div>
+  );
+}
+
+/** One real ESCALATE from the SATG backend, read-only: the backend has no approval queue or approve/reject API. */
+function LiveEscalationCard({ t }: { t: LiveTrace }) {
+  const sandbox = t.stages.find((s) => s.key === "SANDBOX");
+  return (
+    <div className="panel p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {t.verdict && <SatgVerdictBadge verdict={t.verdict} />}
+          <span className="font-mono text-[13px] font-semibold text-fg">
+            {t.ruleId}
+            {t.ml?.riskLevel && <span className="font-normal text-subtle"> · {t.ml.riskLevel}</span>}
+          </span>
+        </div>
+        <span className="font-mono text-[11.5px] text-subtle">
+          #{t.seq} · {new Date(t.at).toLocaleTimeString([], { hour12: false })}
+        </span>
+      </div>
+      <h3 className="mt-3 font-mono text-[16px] font-semibold text-fg">{t.request.tool ?? t.title}</h3>
+      <p className="mt-0.5 font-mono text-[12px] text-subtle">
+        agent {t.request.agentId ?? "—"} · {t.source === "agent" ? "Agent Console" : "Request studio"}
+      </p>
+      {t.reason && <p className="mt-3 text-[13px] leading-snug text-fg/85">{t.reason}</p>}
+      <dl className="mt-3 rounded-xl border border-line bg-black/20 px-3 py-2 font-mono text-[12px]">
+        <LiveFact label="Deterministic decision">{t.decision ? `${t.decision.deterministicVerdict} · ${t.decision.deterministicRuleId}` : "— not in response"}</LiveFact>
+        <LiveFact label="ML risk">
+          {t.ml?.riskScore != null ? `${t.ml.riskScore.toFixed(3)}${t.ml.modelVersion ? ` · ${t.ml.modelVersion}` : ""}` : "— not in response"}
+        </LiveFact>
+        <LiveFact label="Sandbox">{sandbox ? sandbox.status.replace("_", " ").toUpperCase() : "—"}</LiveFact>
+        <LiveFact label="HTTP · round trip">
+          {t.httpStatus ?? "—"} · {t.roundTripMs} ms
+        </LiveFact>
+        <LiveFact label="request_id">{t.requestId ? <Hash value={t.requestId} n={10} /> : "—"}</LiveFact>
+      </dl>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <LiveChip />
+        <Link href={`/provenance/live?seq=${t.seq}`} className="text-[12.5px] font-semibold text-accent hover:underline">
+          Open in Live Request Trace →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+/** Real ESCALATE decisions this tab received through the Live Gateway (in-memory SATG log). */
+function LiveEscalations() {
+  const entries = useSatgLog((s) => s.entries);
+  const escalations = useMemo(() => toLiveTraces(entries).filter((t) => t.verdict === "ESCALATE"), [entries]);
+  return (
+    <section>
+      <SectionTitle right={<LiveChip />}>Live escalations · {escalations.length}</SectionTitle>
+      <p className="-mt-1 mb-4 max-w-3xl text-[13px] leading-relaxed text-muted">
+        Real ESCALATE decisions captured from the Live Gateway in this browser tab. Unlike the demo queue below, these come from the SATG backend. They are live
+        escalation events, not an approval queue: backend approval actions are not implemented, so nothing here can be approved, rejected or executed.
+      </p>
+      {escalations.length ? (
+        <div className="grid gap-5 xl:grid-cols-2">
+          {escalations.map((t) => (
+            <LiveEscalationCard key={t.seq} t={t} />
+          ))}
+        </div>
+      ) : (
+        <Panel className="p-6 text-center text-[13.5px] text-subtle">
+          No live escalations in this tab yet. An ML-001 ESCALATE from the{" "}
+          <Link href="/" className="font-semibold text-accent hover:underline">
+            Live Gateway
+          </Link>{" "}
+          will appear here. The list is kept in memory and resets on reload.
+        </Panel>
+      )}
+    </section>
+  );
+}
+
 export default function ApprovalsView() {
   const gw = useGateway();
   const [operator, setOperator] = useState(OPERATORS[0]);
@@ -150,13 +237,13 @@ export default function ApprovalsView() {
   return (
     <div>
       <PageHeader
-        eyebrow="M3 · M11 — Two-person verification · demo engine"
+        eyebrow="M3 · M11 — Escalations & two-person verification"
         title={
           <>
             Approvals <span className="text-accent">queue</span>
           </>
         }
-        description="Demo queue seeded by the in-browser engine: its Tier-4 destructive calls and ML step-ups wait here, and two distinct approvers produce a simulated Ed25519-signed capability grant bound to the exact canonical arguments, usable once for five minutes. Live Gateway ESCALATE results are held, not queued; an approval workflow is not implemented in the backend yet."
+        description="Live escalations are real ESCALATE decisions this tab received from the SATG backend, shown read-only: the backend holds them and has no approval workflow yet. The demo queue below is seeded by the in-browser engine: its Tier-4 destructive calls and ML step-ups wait there, and two distinct approvers produce a simulated Ed25519-signed capability grant bound to the exact canonical arguments, usable once for five minutes."
         actions={
           <label className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-[13px] text-muted">
             Acting as (demo operator)
@@ -171,7 +258,14 @@ export default function ApprovalsView() {
         }
       />
 
-      <div className="space-y-8">
+      <div className="space-y-10">
+        <LiveEscalations />
+
+        <div className="space-y-8 border-t border-line pt-8">
+        <div>
+          <SectionTitle right={<DemoTag label="SIM" />}>Demo approval queue</SectionTitle>
+          <p className="-mt-1 text-[13px] text-muted">Simulated by the in-browser demo engine. These records are not backend escalations.</p>
+        </div>
         <section>
           <SectionTitle right={<DemoTag />}>Pending · {pending.length}</SectionTitle>
           <div className="grid gap-5 2xl:grid-cols-2">
@@ -213,6 +307,7 @@ export default function ApprovalsView() {
             </ul>
           </section>
         )}
+        </div>
       </div>
     </div>
   );

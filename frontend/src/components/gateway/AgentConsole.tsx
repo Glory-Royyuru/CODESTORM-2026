@@ -456,7 +456,7 @@ export default function AgentConsole({ onResult }: { onResult?: (result: AgentRe
 
     setBusy(true);
     const outcome = await submitToolCall(requestBody); // the one and only backend request for this instruction
-    log(`Agent · ${call.tool}`, outcome);
+    log(`Agent · ${call.tool}`, outcome, requestBody, "agent");
     update(id, { outcome });
     onResult?.({ title: `Agent · ${instruction}`, requestBody, outcome });
     steps.current = [...steps.current, { tool_name: call.tool, arguments: call.parameters, observation: observationFor(outcome) }];

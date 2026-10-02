@@ -10,6 +10,7 @@ import { TAINT_ORDER } from "@/lib/gateway/taint";
 import type { GraphNode, SessionState } from "@/lib/gateway/types";
 import { maxVerdict } from "@/lib/gateway/util";
 import { useGateway } from "@/lib/store";
+import ProvenanceModeTabs from "./ProvenanceModeTabs";
 import SessionNetworkPanel from "./SessionNetworkPanel";
 
 const COL_W = 240;
@@ -98,13 +99,20 @@ export default function ProvenanceView() {
   const [nodeId, setNodeId] = useState<string | null>(null);
   const s = sessions.find((x) => x.id === selectedId) ?? sessions[0];
 
-  if (!s) return <PageHeader eyebrow="Session investigator" title="No sessions yet" />;
+  if (!s)
+    return (
+      <div>
+        <ProvenanceModeTabs current="demo" className="mb-5" />
+        <PageHeader eyebrow="Session investigator" title="No sessions yet" />
+      </div>
+    );
   const { pos, width, height } = layout(s);
   const node = s.nodes.find((n) => n.id === nodeId);
   const atomsById = new Map(s.atoms.map((a) => [a.id, a]));
 
   return (
     <div>
+      <ProvenanceModeTabs current="demo" className="mb-5" />
       <PageHeader
         eyebrow="M4 · M5 — Session investigator · demo engine"
         title={

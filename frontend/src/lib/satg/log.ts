@@ -13,19 +13,23 @@ export interface SatgLogEntry {
   at: number;
   presetTitle: string;
   outcome: SatgOutcome;
+  /** The exact body passed to submitToolCall() for this outcome. In memory only. */
+  requestBody: string;
+  /** Which Live Gateway control sent it: the request studio (presets / manual call) or the agent console. */
+  source: "studio" | "agent";
 }
 
 interface SatgLogState {
   entries: SatgLogEntry[];
-  add: (presetTitle: string, outcome: SatgOutcome) => SatgLogEntry;
+  add: (presetTitle: string, outcome: SatgOutcome, requestBody: string, source: SatgLogEntry["source"]) => SatgLogEntry;
 }
 
 let seq = 0;
 
 export const useSatgLog = create<SatgLogState>((set, get) => ({
   entries: [],
-  add: (presetTitle, outcome) => {
-    const entry = { seq: ++seq, at: Date.now(), presetTitle, outcome };
+  add: (presetTitle, outcome, requestBody, source) => {
+    const entry = { seq: ++seq, at: Date.now(), presetTitle, outcome, requestBody, source };
     set({ entries: [...get().entries.slice(-199), entry] });
     return entry;
   },
