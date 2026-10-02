@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { Database, FileText, Globe2, MessageSquareText, Radio, ShieldAlert, Wrench, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { cx, Drawer, JsonBlock, PageHeader, Panel, SectionTitle, TaintBadge, timeAgo, VerdictBadge } from "@/components/ui/primitives";
+import { cx, DemoTag, Drawer, JsonBlock, PageHeader, Panel, SectionTitle, TaintBadge, timeAgo, VerdictBadge } from "@/components/ui/primitives";
 import { TAINT_HEX } from "@/components/ui/tokens";
 import { TAINT_ORDER } from "@/lib/gateway/taint";
 import type { GraphNode, SessionState } from "@/lib/gateway/types";
@@ -54,9 +54,12 @@ function TrifectaPanel({ s }: { s: SessionState }) {
     <Panel className={cx("p-5", armed && "ring-1 ring-red-500/40")}>
       <SectionTitle
         right={
-          <span className={cx("flex items-center gap-2 font-mono text-[12px] font-semibold", armed ? "text-red-400" : count === 2 ? "text-amber-400" : "text-emerald-400")}>
-            {armed && <ShieldAlert className="h-4 w-4" />}
-            {armed ? "LETHAL TRIFECTA — egress hard-vetoed" : `${count}/3 conditions`}
+          <span className="flex items-center gap-2">
+            <span className={cx("flex items-center gap-2 font-mono text-[12px] font-semibold", armed ? "text-red-400" : count === 2 ? "text-amber-400" : "text-emerald-400")}>
+              {armed && <ShieldAlert className="h-4 w-4" />}
+              {armed ? "LETHAL TRIFECTA — egress hard-vetoed" : `${count}/3 conditions`}
+            </span>
+            <DemoTag />
           </span>
         }
       >
@@ -103,13 +106,13 @@ export default function ProvenanceView() {
   return (
     <div>
       <PageHeader
-        eyebrow="M4 · M5 — Session investigator"
+        eyebrow="M4 · M5 — Session investigator · demo engine"
         title={
           <>
             Provenance <span className="text-accent">DAG</span>
           </>
         }
-        description="Every tool call, retrieved document and external target in a session, with edges colored by the taint lattice. Value-level atom matching links data back to the call that produced it."
+        description="Every tool call, retrieved document and external target in a session, with edges colored by the taint lattice. Value-level atom matching links data back to the call that produced it. These sessions come from the in-browser demo engine; the SATG backend does not track provenance, taint or session state."
       />
 
       <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">

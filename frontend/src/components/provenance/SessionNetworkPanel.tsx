@@ -2,7 +2,7 @@
 
 import { ArrowRight, CheckCircle2, CircleDashed, Cpu, Fingerprint, IdCard, Network, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
-import { cx, Hash, Panel, SectionTitle } from "@/components/ui/primitives";
+import { cx, DemoTag, Disclosure, Hash, Panel, SectionTitle } from "@/components/ui/primitives";
 import { EBPF_PROGRAM, EGRESS_PROXY } from "@/lib/gateway/network/ebpf";
 import type { NetCheckStatus } from "@/lib/gateway/network/firewall";
 import type { SessionState } from "@/lib/gateway/types";
@@ -35,12 +35,13 @@ export default function SessionNetworkPanel({ s }: { s: SessionState }) {
 
   return (
     <Panel className="p-5">
-      <SectionTitle right={<span className="rounded-md bg-accent/15 px-2 py-0.5 font-mono text-[10.5px] font-semibold text-accent">SIMULATED</span>}>
+      <SectionTitle right={<DemoTag label="SIMULATED" title="Simulated by the in-browser demo engine; not live backend telemetry" />}>
         <span className="flex items-center gap-2">
           <Network className="h-4 w-4" /> Network & egress boundary
         </span>
       </SectionTitle>
 
+      <Disclosure className="mb-4" summary="Workload identity and request integrity">
       <div className="grid gap-4 lg:grid-cols-2">
         {/* transport / workload identity */}
         <section className="rounded-xl border border-line bg-surface p-3.5">
@@ -83,10 +84,11 @@ export default function SessionNetworkPanel({ s }: { s: SessionState }) {
           )}
         </section>
       </div>
+      </Disclosure>
 
       {/* destination firewall */}
       {net && (
-        <section className="mt-4">
+        <section className="mb-4">
           <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.12em] text-subtle">Destination firewall · last URL call ({lastNet!.envelope.tool})</p>
           <div className="mb-3 flex flex-wrap items-center gap-2 font-mono text-[12px]">
             <span className="rounded-lg border border-line bg-surface px-2.5 py-1 text-fg">{net.host ?? net.url}</span>
@@ -112,9 +114,9 @@ export default function SessionNetworkPanel({ s }: { s: SessionState }) {
       )}
 
       {/* eBPF egress */}
-      <section className="mt-4">
+      <section>
         <p className="mb-2 flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-[0.12em] text-subtle">
-          <Cpu className="h-3.5 w-3.5" /> eBPF egress policy · ENFORCED
+          <Cpu className="h-3.5 w-3.5" /> eBPF egress policy · SIMULATED
           <span className="normal-case tracking-normal">
             {EBPF_PROGRAM} · proxy {EGRESS_PROXY.ip}:{EGRESS_PROXY.port}
           </span>
@@ -133,6 +135,7 @@ export default function SessionNetworkPanel({ s }: { s: SessionState }) {
           <span className={e.drops ? "text-red-300" : undefined}>{e.drops} drop(s) · {e.sockets.length} socket(s)</span>
         </div>
         {e.sockets.length ? (
+          <Disclosure summary={`Socket log · ${e.sockets.length}`}>
           <ul className="space-y-1">
             {e.sockets.map((k, i) => (
               <li key={i} className="grid grid-cols-[52px_minmax(0,1fr)] items-start gap-2 rounded-lg border border-line bg-black/20 px-2.5 py-1.5 font-mono text-[11.5px]">
@@ -144,6 +147,7 @@ export default function SessionNetworkPanel({ s }: { s: SessionState }) {
               </li>
             ))}
           </ul>
+          </Disclosure>
         ) : (
           <p className="text-[12.5px] text-subtle">No outbound sockets in this session.</p>
         )}

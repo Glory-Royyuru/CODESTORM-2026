@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Bomb, Fingerprint, PackagePlus, RotateCcw, Server, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Button, cx, Drawer, Hash, PageHeader, Panel, SectionTitle, Stat, StatusBadge, timeAgo } from "@/components/ui/primitives";
+import { Button, cx, DemoTag, Drawer, Hash, PageHeader, Panel, SectionTitle, Stat, StatusBadge, timeAgo } from "@/components/ui/primitives";
 import { TIER_LABEL } from "@/components/ui/tokens";
 import { manifestHash, scanManifest } from "@/lib/gateway/registry";
 import type { Capability, RegisteredTool, RiskTier, ToolManifest } from "@/lib/gateway/types";
@@ -161,7 +161,15 @@ function RegisterDrawer({ open, onClose }: { open: boolean; onClose: () => void 
 
   const field = "w-full rounded-xl border border-line bg-black/20 px-3 py-2.5 text-[14px] text-fg outline-none focus:ring-2 focus:ring-accent/50";
   return (
-    <Drawer open={open} onClose={onClose} title="Register MCP tool">
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={
+        <span className="flex items-center gap-2">
+          Register MCP tool <DemoTag />
+        </span>
+      }
+    >
       <div className="space-y-4">
         <label className="block">
           <span className="mb-1.5 block text-[12.5px] font-semibold text-muted">Tool name</span>
@@ -248,13 +256,13 @@ export default function RegistryView() {
   return (
     <div>
       <PageHeader
-        eyebrow="M2 — Tool registry & integrity engine"
+        eyebrow="M2 — Tool registry & integrity engine · demo engine"
         title={
           <>
-            Pinned manifests, <span className="text-accent">zero rug-pulls</span>
+            Tool registry, <span className="text-accent">hash-pinned</span>
           </>
         }
-        description="Every tool's name, description, parameter schema and server identity is hashed with SHA-256 and pinned at registration. Any drift at call time freezes the tool into quarantine."
+        description="A demo registry run by the in-browser engine: each tool's name, description, parameter schema and server identity is hashed with SHA-256 and pinned at registration, and drift at call time quarantines the tool. The SATG backend keeps its own registry, which pins manifest hashes and refuses a drifted manifest (TOOL-004); the poisoning scanner, quarantine, re-pin and registration shown here are demo only."
         actions={
           <Button variant="primary" onClick={() => setOpen(true)}>
             <PackagePlus className="h-4 w-4" /> Register tool
@@ -270,6 +278,7 @@ export default function RegistryView() {
       <Panel className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 font-mono text-[12px] text-muted">
         <span className="text-subtle">pin =</span> sha256(canonical_json(&#123;name, description, parameters, required, server&#125;))
       </Panel>
+      <SectionTitle right={<DemoTag />}>Demo registry · {tools.length} tools</SectionTitle>
       <motion.div layout className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
         {tools.map((t) => (
           <ToolCard key={t.manifest.name} tool={t} />

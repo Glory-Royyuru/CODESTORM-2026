@@ -79,6 +79,16 @@ export function DemoTag({ label = "SIM", title = "Simulated by the in-browser de
   );
 }
 
+/** Progressive disclosure for secondary detail, styled like the Live Gateway's "View request JSON" toggles. */
+export function Disclosure({ summary, children, className }: { summary: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <details className={className}>
+      <summary className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline">{summary}</summary>
+      <div className="mt-2">{children}</div>
+    </details>
+  );
+}
+
 /** Segmented tabs in the console's outlined style (active = orange outline, as in the Live Gateway's detail toggles). */
 export function Tabs<T extends string>({
   items,

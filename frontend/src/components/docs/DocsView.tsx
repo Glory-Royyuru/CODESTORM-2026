@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { cx, PageHeader, Panel, SectionTitle } from "@/components/ui/primitives";
+import { cx, DemoTag, Disclosure, PageHeader, Panel, SectionTitle } from "@/components/ui/primitives";
 
 type Status = "implemented" | "partial" | "demo" | "planned";
 
@@ -66,7 +66,7 @@ const MODULES: { id: string; name: string; status: Status; body: string; backend
     name: "Behavioral ML",
     status: "implemented",
     body: "p_injection (logistic), p_misaligned (hashed-trigram embeddings vs. user goal), a real isolation forest, tool-sequence trigram surprise and session CUSUM.",
-    backend: "The backend runs its own model, satg-ml-v0.1 (ml/): MiniLM embeddings with LogisticRegression, IsolationForest, trigram surprisal and CUSUM, fused by calibrated XGBoost. The description above is the demo engine's smaller model.",
+    backend: "The backend runs its own model, satg-ml-v0.1 (ml/): MiniLM embeddings with LogisticRegression, IsolationForest, trigram surprisal and CUSUM, fused by calibrated XGBoost. The demo-engine design below describes its smaller in-browser model.",
     where: "ml.ts",
   },
   {
@@ -201,12 +201,14 @@ export default function DocsView() {
                     <StatusChip status={m.status} />
                   </span>
                 </div>
-                <p className="mt-3 text-[13.5px] leading-relaxed text-muted">{m.body}</p>
-                <p className="mt-3 border-t border-line pt-3 text-[13px] leading-relaxed text-fg/85">
+                <p className="mt-3 text-[13px] leading-relaxed text-fg/85">
                   <span className="font-semibold text-fg">Backend: </span>
                   {m.backend}
                 </p>
-                <p className="mt-3 font-mono text-[11.5px] text-subtle">demo engine: src/lib/gateway/{m.where}</p>
+                <Disclosure className="mt-3 border-t border-line pt-3" summary="Full design in the demo engine">
+                  <p className="text-[13px] leading-relaxed text-muted">{m.body}</p>
+                  <p className="mt-2 font-mono text-[11.5px] text-subtle">demo engine: src/lib/gateway/{m.where}</p>
+                </Disclosure>
               </Panel>
             </motion.div>
           ))}
@@ -214,12 +216,13 @@ export default function DocsView() {
       </section>
 
       <section className="grid gap-5 xl:grid-cols-2">
-        <Panel className="min-w-0 p-5 sm:p-6">
+        <Panel className="min-w-0 self-start p-5 sm:p-6">
           <SectionTitle right={<StatusChip status="demo" />}>Stage contracts · demo engine</SectionTitle>
           <p className="mb-3 text-[12.5px] leading-snug text-subtle">
             Limits and stages of the in-browser demo engine. The SATG backend enforces depth ≤ 8 and 64 KiB with no rate limiting, has no DLP stage, and issues
             HMAC-SHA256 request-integrity tags instead of Ed25519 receipts; its sandbox is Docker, not gVisor.
           </p>
+          <Disclosure summary={`Show the ${PHASES.length} demo-engine stages`}>
           <div className="scrollbar-thin overflow-x-auto">
             <table className="w-full min-w-[560px] text-left text-[13px]">
               <thead>
@@ -240,6 +243,7 @@ export default function DocsView() {
               </tbody>
             </table>
           </div>
+          </Disclosure>
         </Panel>
 
         <Panel className="min-w-0 p-5 sm:p-6">
@@ -248,14 +252,13 @@ export default function DocsView() {
             {ACCEPTANCE.map(([c, how, kind]) => (
               <li key={c} className="flex flex-col gap-0.5 rounded-lg border border-line bg-surface px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <span className="flex items-center gap-2 text-[13.5px] text-fg">
-                  <span
-                    className={cx(
-                      "rounded px-1.5 font-mono text-[10px] font-semibold",
-                      kind === "real" ? "bg-emerald-400/10 text-emerald-300" : "bg-fg/10 text-subtle",
-                    )}
-                  >
-                    {kind === "real" ? "REAL" : "SIM"}
-                  </span>
+                  {kind === "real" ? (
+                    <span title="Checked against the real SATG backend" className="rounded bg-emerald-400/10 px-1 font-mono text-[10px] text-emerald-300">
+                      REAL
+                    </span>
+                  ) : (
+                    <DemoTag />
+                  )}
                   {c}
                 </span>
                 <span className="font-mono text-[12px] text-subtle">{how}</span>

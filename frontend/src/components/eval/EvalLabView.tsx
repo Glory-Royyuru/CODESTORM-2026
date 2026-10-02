@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { FlaskConical, Play, Shuffle, Undo2, Zap } from "lucide-react";
 import { useRef, useState } from "react";
-import { Button, cx, PageHeader, Panel, SectionTitle, VerdictBadge } from "@/components/ui/primitives";
+import { Button, cx, DemoTag, PageHeader, Panel, SectionTitle, Tabs, VerdictBadge } from "@/components/ui/primitives";
 import { generateCases, runCase, summarize, SUITES, type CaseResult } from "@/lib/gateway/benchmarks";
 import { decodeLayers, MUTATORS, type DecodeReport } from "@/lib/gateway/decoder";
 import { Gateway } from "@/lib/gateway/engine";
@@ -73,28 +73,31 @@ function PayloadMutator() {
 
   return (
     <Panel className="p-5 sm:p-6">
-      <SectionTitle right={<span className="font-mono text-[11.5px] text-subtle">bounded 4-layer decode · 10x expansion cap</span>}>
+      <SectionTitle
+        right={
+          <span className="flex items-center gap-2 font-mono text-[11.5px] text-subtle">
+            bounded 4-layer decode · 10x expansion cap
+            <DemoTag />
+          </span>
+        }
+      >
         <span className="flex items-center gap-2">
           <Shuffle className="h-4 w-4" /> Attack payload mutator
         </span>
       </SectionTitle>
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            {Object.keys(TARGETS).map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => {
-                  setTarget(k as keyof typeof TARGETS);
-                  reset(TARGETS[k].seed);
-                }}
-                className={cx("rounded-lg border px-2.5 py-1 font-mono text-[12px]", k === target ? "border-accent/60 bg-accent/15 text-accent" : "border-line bg-surface text-muted hover:text-fg")}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            size="sm"
+            className="max-w-full flex-wrap"
+            label="Payload target"
+            value={target}
+            onChange={(k) => {
+              setTarget(k);
+              reset(TARGETS[k].seed);
+            }}
+            items={Object.keys(TARGETS).map((k) => ({ id: k, label: <span className="font-mono text-[12px]">{k}</span> }))}
+          />
           <textarea
             value={current}
             onChange={(e) => {
@@ -226,17 +229,23 @@ export default function EvalLabView() {
             <span>{Math.round((progress.done / progress.total) * 100)}%</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-surface">
-            <motion.div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-accent" animate={{ width: `${(progress.done / progress.total) * 100}%` }} transition={{ duration: 0.2 }} />
+            <motion.div className="h-full rounded-full bg-accent/80" animate={{ width: `${(progress.done / progress.total) * 100}%` }} transition={{ duration: 0.2 }} />
           </div>
         </Panel>
       )}
 
+      <section>
+      <SectionTitle right={<DemoTag />}>Demo benchmark results</SectionTitle>
+      {!progress && (
+        <p className="mb-3 text-[13px] text-subtle">No demo benchmark has run yet. Run it to fill the gauges and suite cards below with demo-engine results.</p>
+      )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Gauge label="Attack detection rate" value={has ? all.detectionRate : null} display={has ? `${(all.detectionRate * 100).toFixed(1)}%` : "—"} target="> 98.4%" good={has ? all.detectionRate > 0.984 : null} />
         <Gauge label="False positive rate" value={has ? all.falsePositiveRate * 10 : null} display={has ? `${(all.falsePositiveRate * 100).toFixed(2)}%` : "—"} target="< 0.8%" good={has ? all.falsePositiveRate < 0.008 : null} />
         <Gauge label="p95 deterministic" value={has ? all.p95Det / 15 : null} display={has ? `${all.p95Det.toFixed(1)}ms` : "—"} target="≈ 8.2ms · < 15ms" good={has ? all.p95Det < 15 : null} />
         <Gauge label="p95 ML-augmented" value={has ? all.p95Total / 40 : null} display={has ? `${all.p95Total.toFixed(1)}ms` : "—"} target="≈ 31.4ms · < 40ms" good={has ? all.p95Total < 40 : null} />
       </div>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
         {SUITES.map((suite) => {

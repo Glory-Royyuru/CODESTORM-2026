@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { BadgeCheck, Ban, KeyRound, Play, Repeat, UserCheck, Users } from "lucide-react";
 import { useState } from "react";
-import { Button, cx, Hash, JsonBlock, PageHeader, Panel, SectionTitle, timeAgo, VerdictBadge } from "@/components/ui/primitives";
+import { Button, cx, DemoTag, Disclosure, Hash, JsonBlock, PageHeader, Panel, SectionTitle, timeAgo, VerdictBadge } from "@/components/ui/primitives";
 import type { ApprovalRequest, Verdict } from "@/lib/gateway/types";
 import { getGateway, useGateway, useUi } from "@/lib/store";
 
@@ -106,10 +106,14 @@ function ApprovalCard({ a, operator }: { a: ApprovalRequest; operator: string })
           <dl className="grid gap-x-6 gap-y-1.5 font-mono text-[11.5px] sm:grid-cols-2">
             <div className="flex justify-between gap-2"><dt className="text-subtle">grant</dt><dd className="text-code">{a.grant.grantId}</dd></div>
             <div className="flex justify-between gap-2"><dt className="text-subtle">expires</dt><dd className="text-code">{new Date(a.grant.expiresAt).toLocaleTimeString([], { hour12: false })}</dd></div>
-            <div className="flex justify-between gap-2"><dt className="text-subtle">args digest</dt><dd><Hash value={a.grant.argsDigest} n={10} /></dd></div>
             <div className="flex justify-between gap-2"><dt className="text-subtle">state</dt><dd className={a.grant.used ? "text-amber-300" : "text-emerald-300"}>{a.grant.used ? "CONSUMED" : "UNUSED"}</dd></div>
-            <div className="sm:col-span-2"><dt className="text-subtle">ed25519 signature</dt><dd className="break-all text-code">{a.grant.signature}</dd></div>
           </dl>
+          <Disclosure className="mt-3" summary="Argument digest and signature">
+            <dl className="space-y-1.5 font-mono text-[11.5px]">
+              <div className="flex justify-between gap-2"><dt className="text-subtle">args digest</dt><dd><Hash value={a.grant.argsDigest} n={10} /></dd></div>
+              <div><dt className="text-subtle">ed25519 signature</dt><dd className="break-all text-code">{a.grant.signature}</dd></div>
+            </dl>
+          </Disclosure>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {a.status === "APPROVED" && (
               <Button variant="primary" className="h-9 text-[13px]" onClick={execute}>
@@ -169,7 +173,7 @@ export default function ApprovalsView() {
 
       <div className="space-y-8">
         <section>
-          <SectionTitle>Pending · {pending.length}</SectionTitle>
+          <SectionTitle right={<DemoTag />}>Pending · {pending.length}</SectionTitle>
           <div className="grid gap-5 2xl:grid-cols-2">
             <AnimatePresence mode="popLayout">
               {pending.map((a) => (
