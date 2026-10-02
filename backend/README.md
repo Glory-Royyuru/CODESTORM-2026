@@ -141,8 +141,18 @@ All settings are environment variables with built-in defaults ([app/config.py](a
 | `SANDBOX_MAX_OUTPUT_BYTES` | `16384` | Cap on stdout/stderr returned |
 | `DOCKER_BIN` | `docker` | Docker CLI |
 | `SATG_GATEWAY_HMAC_SECRET` | random per process | HMAC key for `request_integrity` (≥ 32 bytes) |
+| `SATG_AUDIT_API_TOKEN` | unset: audit API disabled | Operator bearer token for `GET /v1/audit/events` (≥ 32 characters). Keep it server-side |
 
 The console's proxy waits up to 25 s for a verdict ([`../frontend/src/lib/satg/proxy.ts`](../frontend/src/lib/satg/proxy.ts)): DNS pinning (2 s) + `ML_TIMEOUT_SECONDS` (3 s) + `SANDBOX_TIMEOUT` (10 s) + container clean-up and margin. Raise it if you raise those.
+
+## Audit API
+
+`GET /v1/audit/events` ([app/audit/api.py](app/audit/api.py)) is a read-only view of the audit log: every decision of **this backend process since it started**, up to 10,000 events, newest first. It is in memory only: not persistent, signed, hash-chained or shared between uvicorn workers, and a restart starts empty. The endpoint never runs a check, the ML model or the sandbox.
+
+- **Access:** `Authorization: Bearer <SATG_AUDIT_API_TOKEN>`. A missing or wrong token gets `401`; with no token configured the API is disabled (`503`). `/v1/toolcalls` is unaffected. The console's Next.js server adds the token itself; it never reaches the browser.
+- **Query:** `limit` (1–200, default 50), `before_seq` (cursor from `next_before_seq`), and exact-match filters `verdict`, `rule_id`, `tool`, `agent_id`, `request_id`. Invalid values get `422`.
+- **Each event** has a server `seq` (1 for the first event of the process) and `timestamp` (when the audit record was written, after the decision and any sandbox run), plus the verdict, rule, reason, stage, claimed identity, checks, versions, hashes, deterministic decision and summaries of ML, sandbox, network and anomalies. The page reports `capacity`, `retained`, `total_recorded`, `evicted`, `oldest_seq`/`newest_seq` and `process_started_at`.
+- **Withheld:** request parameters, context text and tool output (never stored), the HMAC signature, ML features/signals/top factors (also stripped from ML-001/002 reasons) and ML error detail, the anomaly hex snippet, raw sandbox error text (only a short runner code and fixed wording), and URL query strings, fragments and userinfo.
 
 ## Identity
 
@@ -191,7 +201,8 @@ backend/
 │   ├── ml/                         # feature_extractor, model_loader, predictor (MLRiskEngine)
 │   ├── sandbox/                    # manager (preconditions), docker_runner (hardened docker run)
 │   └── audit/
-│       ├── logger.py               # Audit events (in memory + JSON log lines)
+│       ├── logger.py               # Audit events (in memory + JSON log lines), server seq
+│       ├── api.py                  # GET /v1/audit/events (read-only, operator token, redacted)
 │       └── anomaly_ledger.py       # Append-only quarantine envelopes (in memory)
 ├── tests/
 ├── requirements.txt

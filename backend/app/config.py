@@ -5,9 +5,10 @@ rather than being silently replaced.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,6 +17,8 @@ SANDBOX_MODES = ("docker", "off")
 # advisory: ML failure keeps the deterministic decision (ml/integration_contract.md §1.4)
 # off:      ML is not consulted
 ML_MODES = ("advisory", "required", "off")
+# Operator token for the read-only audit API (app/audit/api.py), same minimum as the HMAC secret.
+MIN_AUDIT_TOKEN_CHARS = 32
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,10 @@ class Settings:
     # Upper bound on one prediction (model loading is not included).
     ml_timeout_seconds: float
 
+    # Bearer token for GET /v1/audit/events. None (unset): the audit API is
+    # disabled. Never logged or returned (repr=False).
+    audit_api_token: Optional[str] = field(default=None, repr=False)
+
 
 def _env(name: str, default: str) -> str:
     value = os.environ.get(name)
@@ -63,6 +70,15 @@ def _number(name: str, default: str, cast, low, high):
     if not low <= value <= high:
         raise ValueError(f"{name} must be within [{low}, {high}], got {value}")
     return value
+
+
+def _audit_token() -> Optional[str]:
+    token = os.environ.get("SATG_AUDIT_API_TOKEN", "").strip()
+    if not token:
+        return None
+    if len(token) < MIN_AUDIT_TOKEN_CHARS:
+        raise ValueError(f"SATG_AUDIT_API_TOKEN must be at least {MIN_AUDIT_TOKEN_CHARS} characters")
+    return token
 
 
 def load_settings() -> Settings:
@@ -92,6 +108,7 @@ def load_settings() -> Settings:
         ml_high_risk_threshold=high,
         ml_critical_risk_threshold=critical,
         ml_timeout_seconds=_number("ML_TIMEOUT_SECONDS", "3.0", float, 0.1, 30.0),
+        audit_api_token=_audit_token(),
     )
 
 

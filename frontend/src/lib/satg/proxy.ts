@@ -21,7 +21,12 @@ const TIMEOUT_MS = 25_000;
 // this cap are forwarded so the backend can reject and audit them.
 const MAX_FORWARD_BYTES = 1024 * 1024;
 
-export type ProxyErrorCode = "BACKEND_UNREACHABLE" | "BACKEND_TIMEOUT" | "BACKEND_MISCONFIGURED" | "PROXY_BODY_TOO_LARGE";
+export type ProxyErrorCode = "BACKEND_UNREACHABLE" | "BACKEND_TIMEOUT" | "BACKEND_MISCONFIGURED" | "PROXY_BODY_TOO_LARGE" | "AUDIT_NOT_CONFIGURED";
+
+/** Query parameters the audit route forwards (backend/app/audit/api.py). Everything else is dropped. */
+export const AUDIT_QUERY_PARAMS = ["limit", "before_seq", "verdict", "rule_id", "tool", "agent_id", "request_id"] as const;
+// The backend validates each value (identifiers are at most 128 characters); this only bounds the URL.
+const MAX_AUDIT_QUERY_VALUE = 256;
 
 function backendBaseUrl(): URL | null {
   try {
@@ -55,12 +60,42 @@ export async function forwardToBackend(path: "/health" | "/v1/toolcalls", init: 
     if (contentType !== null) headers.set("content-type", contentType);
   }
 
+  return relay(new URL(path, base), { method: init.method, headers, body });
+}
+
+/** Keep only the audit query parameters the backend understands, first value each, bounded in length. */
+export function pickAuditQuery(search: URLSearchParams): URLSearchParams {
+  const picked = new URLSearchParams();
+  for (const name of AUDIT_QUERY_PARAMS) {
+    const value = search.get(name);
+    if (value !== null && value !== "" && value.length <= MAX_AUDIT_QUERY_VALUE) picked.set(name, value);
+  }
+  return picked;
+}
+
+/**
+ * Forward `GET /v1/audit/events` with the operator token, which lives only in
+ * this server's environment (SATG_AUDIT_API_TOKEN): the browser never sends or
+ * receives it. Only the known query parameters are forwarded.
+ */
+export async function forwardAuditEvents(search: URLSearchParams): Promise<Response> {
+  const base = backendBaseUrl();
+  if (!base) return proxyError(500, "BACKEND_MISCONFIGURED", "SATG_BACKEND_URL is not a valid http(s) URL");
+  const token = process.env.SATG_AUDIT_API_TOKEN?.trim();
+  if (!token) return proxyError(503, "AUDIT_NOT_CONFIGURED", "SATG_AUDIT_API_TOKEN is not set on the console server");
+  const url = new URL("/v1/audit/events", base);
+  url.search = pickAuditQuery(search).toString();
+  return relay(url, { method: "GET", headers: new Headers({ accept: "application/json", authorization: `Bearer ${token}` }) });
+}
+
+/** Send one request to the backend and relay its status, content type and body as-is. */
+async function relay(url: URL, init: { method: "GET" | "POST"; headers: Headers; body?: ArrayBuffer }): Promise<Response> {
   let upstream: Response;
   try {
-    upstream = await fetch(new URL(path, base), {
+    upstream = await fetch(url, {
       method: init.method,
-      headers,
-      body,
+      headers: init.headers,
+      body: init.body,
       cache: "no-store",
       redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),

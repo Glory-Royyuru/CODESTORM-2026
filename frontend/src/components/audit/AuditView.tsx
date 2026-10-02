@@ -2,11 +2,12 @@
 
 import { ScrollText, ShieldAlert, ShieldCheck, Search } from "lucide-react";
 import { useState } from "react";
-import { Button, cx, Hash, Modal, PageHeader, Panel, Tabs, VerdictBadge } from "@/components/ui/primitives";
+import { Button, cx, DemoTag, Hash, Modal, PageHeader, Panel, Tabs, VerdictBadge } from "@/components/ui/primitives";
 import { verifyReceipt } from "@/lib/gateway/receipts";
 import type { Verdict } from "@/lib/gateway/types";
 import { useAnomalyLedger, useGateway, useUi } from "@/lib/store";
 import AnomalyInspector from "./AnomalyInspector";
+import LiveAuditView from "./LiveAuditView";
 import ReceiptInspector from "./ReceiptInspector";
 
 const TABS: { id: string; label: string; match: (v: Verdict) => boolean }[] = [
@@ -24,6 +25,9 @@ export default function AuditView() {
   const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get("receipt"));
   const [chain, setChain] = useState<{ ok: number; total: number; firstBad?: number } | null>(null);
   const [view, setView] = useState<"receipts" | "anomalies">(() => (new URLSearchParams(window.location.search).get("view") === "anomalies" ? "anomalies" : "receipts"));
+  // Live (SATG backend) and demo (simulated) data are separate views and never share rows.
+  // Links into the demo ledger (?receipt= / ?view=) open it directly.
+  const [mode, setMode] = useState<"live" | "demo">(() => (selected !== null || view === "anomalies" ? "demo" : "live"));
   const anomalyCount = useAnomalyLedger().length;
 
   const ledger = gw.ledger;
@@ -52,20 +56,37 @@ export default function AuditView() {
   return (
     <div>
       <PageHeader
-        eyebrow="M10 — Cryptographic audit receipts · demo engine"
+        eyebrow="M10 — Audit · live backend history and demo ledger"
         title={
           <>
             Audit <span className="text-accent">ledger</span>
           </>
         }
-        description="A simulated ledger kept by the in-browser demo engine: each demo-engine decision, including every BLOCK, is canonicalized, Ed25519-signed and hash-chained to the previous receipt, and any row can be verified in your browser. Live Gateway requests do not appear here; the SATG backend keeps its own in-memory audit log, which the API does not expose, and has no signed receipts or hash chain yet."
+        description="Live audit shows the SATG backend's own audit records: every decision since its process started, read through an operator-authenticated, read-only API. It is in memory only, not signed or hash-chained. The demo ledger is simulated by the in-browser engine: its decisions are Ed25519-signed and hash-chained so they can be verified here, and Live Gateway requests never appear in it."
         actions={
-          <Button variant="primary" onClick={verifyAll}>
-            <ShieldCheck className="h-4 w-4" /> Verify entire chain
-          </Button>
+          mode === "demo" && (
+            <Button variant="primary" onClick={verifyAll}>
+              <ShieldCheck className="h-4 w-4" /> Verify entire chain
+            </Button>
+          )
         }
       />
 
+      <Tabs
+        className="mb-5"
+        label="Audit source"
+        value={mode}
+        onChange={setMode}
+        items={[
+          { id: "live", label: <>Live audit · SATG backend</> },
+          { id: "demo", label: <>Demo ledger <DemoTag /></> },
+        ]}
+      />
+
+      {mode === "live" ? (
+        <LiveAuditView />
+      ) : (
+      <>
       {chain && (
         <Panel className={cx("mb-5 flex flex-wrap items-center gap-3 px-5 py-3 font-mono text-[12.5px]", chain.ok === chain.total ? "text-emerald-300" : "text-red-300")}>
           <ShieldCheck className="h-4 w-4" />
@@ -151,6 +172,8 @@ export default function AuditView() {
             {!rows.length && <p className="p-8 text-center text-[14px] text-subtle">No receipts match.</p>}
           </div>
         </Panel>
+      )}
+      </>
       )}
 
       <Modal

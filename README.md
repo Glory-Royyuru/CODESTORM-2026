@@ -47,7 +47,8 @@ Browser console / agent caller
    │                                   non-root user 65532 · 256m RAM · 0.5 CPU · 64 PIDs · 10 s timeout
    ▼
 [AUDIT] ────────────────────────────── In-memory audit log (JSON lines on stderr); tool output kept only
-                                       as SHA-256 + size. No persistence, signatures or hash chain yet.
+                                       as SHA-256 + size. Read-only GET /v1/audit/events (operator token,
+                                       redacted). No persistence, signatures or hash chain yet.
 ```
 
 ### The Monotonic Security Invariant
@@ -73,7 +74,7 @@ A deterministic `BLOCK` can never become `ALLOW`, whatever the model outputs, wh
 | **M8** | Sandboxed Execution | **IMPLEMENTED** | Disposable non-root container, no network, read-only, caps dropped, resource limits, timeout with verified clean-up, no host fallback. The Docker daemon itself is not rootless |
 | **M9** | Response Security & DLP | **PLANNED** (backend) / **DEMO ONLY** (console) | The backend returns tool output unredacted; the audit log stores only its hash and size |
 | **M10** | Signed Receipts & Audit Chain | **PARTIAL** | HMAC-SHA256 request-integrity tags IMPLEMENTED. Ed25519 receipts and a hash-chained ledger are DEMO ONLY; the backend audit log is in memory only. No database |
-| **M11** | Control Plane Console | **PARTIAL** | The Live Gateway shows real backend verdicts. Provenance, Registry, Audit Ledger, Eval Lab, Policies, Approvals and the kill switch are DEMO ONLY simulations |
+| **M11** | Control Plane Console | **PARTIAL** | Real backend data: the Live Gateway, the Live Request Trace, Live Escalations on Approvals, and Live audit on the Audit page (the backend's in-memory audit history). DEMO ONLY simulations: the Provenance DAG, Registry, the demo Audit ledger, Eval Lab, Policies, the demo approval queue and the kill switch |
 
 Also **PLANNED**, not implemented: agent authentication (mTLS / OAuth / DPoP / SPIFFE; `agent_id` is self-asserted), a human approval workflow for ESCALATE, persistence (PostgreSQL / Redis), capability tokens and resource ownership checks.
 

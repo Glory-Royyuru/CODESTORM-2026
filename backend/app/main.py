@@ -6,6 +6,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from app.audit.anomaly_ledger import append_anomaly, quarantine_record
+from app.audit.api import router as audit_router
 from app.audit.logger import record_audit_event
 from app.config import get_settings
 from app.gateway.identity import resolve_principal
@@ -32,6 +33,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="PNC3 Secure Agent Tool Gateway", lifespan=lifespan)
+# Read-only, operator-token protected view of the in-memory audit log.
+app.include_router(audit_router)
 
 _log = logging.getLogger("satg.gateway")
 
